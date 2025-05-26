@@ -10,6 +10,7 @@ import { applyCssVariables } from './styles/colors';
 import { ConfigProvider, theme } from 'antd';
 import { colors } from './styles/colors';
 import { getInitialTheme } from './utils/get-initial-theme';
+import './styles/global.css';
 
 const initialTheme = getInitialTheme();
 

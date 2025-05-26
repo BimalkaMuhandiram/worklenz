@@ -19,6 +19,14 @@ export interface IReportingInfo {
   organization_name: string;
 }
 
+export interface IAiChatInfo {
+  id: string;
+  userId: string;
+  createdAt: string;
+  content: string;
+  response: string;
+}
+
 export interface IRPTTeamStatistics {
   count: number;
   projects: number;

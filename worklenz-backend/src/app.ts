@@ -23,7 +23,19 @@ import safeControllerFunction from "./shared/safe-controller-function";
 import AwsSesController from "./controllers/aws-ses-controller";
 import { CSP_POLICIES } from "./shared/csp";
 
+import smartChatApiRouter from './routes/apis/smart-chat-api-router';
+
 const app = express();
+
+app.use(express.json());
+
+// Register smart chat routes
+app.use('/api/v1/smart-chat', smartChatApiRouter);
+
+// Start the server
+app.listen(3000, () => {
+  console.log('Server running on port 3000');
+});
 
 // Trust first proxy if behind reverse proxy
 app.set("trust proxy", 1);
@@ -54,25 +66,23 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 const allowedOrigins = [
   isProduction() 
     ? [
-        `http://localhost:5000`,
-        `http://127.0.0.1:5000`,
-        process.env.SERVER_CORS || "",  // Add hostname from env
-        process.env.FRONTEND_URL || ""  // Support FRONTEND_URL as well
-      ].filter(Boolean)  // Remove empty strings
+        `https://react.worklenz.com`,
+        `https://v2.worklenz.com`,
+        `https://dev.worklenz.com`
+      ]
     : [
         "http://localhost:3000",
+        "http://localhost:3001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:5000",
-        `http://localhost:5000`,
-        process.env.SERVER_CORS || "",  // Add hostname from env
-        process.env.FRONTEND_URL || ""  // Support FRONTEND_URL as well
-      ].filter(Boolean)  // Remove empty strings
+        "http://127.0.0.1:3001"
+      ]
 ].flat();
 
 app.use(cors({
   origin: (origin, callback) => {
+    console.log(origin);
     if (!isProduction() || !origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -130,7 +140,7 @@ app.use((req, res, next) => {
   if (
     req.path.startsWith("/webhook/") ||
     req.path.startsWith("/secure/") ||
-    req.path.startsWith("/api/") ||
+
     req.path.startsWith("/public/")
   ) {
     next();
@@ -141,7 +151,7 @@ app.use((req, res, next) => {
 
 // Set CSRF token cookie
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.csrfToken) {
+  if (typeof req.csrfToken === 'function') {
     const token = req.csrfToken();
     res.cookie("XSRF-TOKEN", token, {
       httpOnly: false,

@@ -1,0 +1,23 @@
+:root {
+  --background-color: #fff;
+  --text-color: #000;
+  --user-bubble-bg: #e6f7ff;
+  --user-bubble-text: #000;
+  --assistant-bubble-bg: #f5f5f5;
+  --assistant-bubble-text: #000;
+  --prompt-bg: #f0f0f0;
+  --prompt-text: #000;
+  --prompt-border: #d9d9d9;
+}
+
+[data-theme='dark'] {
+  --background-color: #1f1f1f;
+  --text-color: #f0f0f0;
+  --user-bubble-bg: #3a3a3a;
+  --user-bubble-text: #fff;
+  --assistant-bubble-bg: #2a2a2a;
+  --assistant-bubble-text: #fff;
+  --prompt-bg: #333;
+  --prompt-text: #fff;
+  --prompt-border: #444;
+}

@@ -1,0 +1,33 @@
+import { CommentOutlined, FireOutlined, HeartOutlined, ReadOutlined, RocketOutlined, SmileOutlined } from "@ant-design/icons"; // Brings in icons for UI categories
+import { Prompts, PromptsProps } from "@ant-design/x"; // Component library for interactive prompts
+import { GetProp, Space } from "antd";
+
+// A helper to display a title with an icon in a neat horizontal layout
+const renderTitle = (icon: React.ReactElement, title: string) => (
+    <Space align="start">
+      {icon}
+      <span>{title}</span>
+    </Space>
+  );
+
+export const senderPromptsItems: GetProp<typeof Prompts, 'items'> = [];
+
+// Defines categorized, hierarchical prompt groups
+export const firstScreenPrompts: PromptsProps['items'] = [
+  // Shows important things a user might want to know right away
+    {
+      key: '1',
+      children: [
+        {
+        key: '2',
+        description: 'I want to list down all Projects',
+        icon: <ReadOutlined style={{ color: '#1890FF' }} />,
+        },
+        {
+        key: '1',
+        description: 'I want to summarization of projects',
+        icon: <FireOutlined style={{ color: '#FF4D4F' }} />,
+        }
+      ]
+    }
+  ];
