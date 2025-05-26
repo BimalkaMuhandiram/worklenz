@@ -27,16 +27,6 @@ import smartChatApiRouter from './routes/apis/smart-chat-api-router';
 
 const app = express();
 
-app.use(express.json());
-
-// Register smart chat routes
-app.use('/api/v1/smart-chat', smartChatApiRouter);
-
-// Start the server
-app.listen(3000, () => {
-  console.log('Server running on port 3000');
-});
-
 // Trust first proxy if behind reverse proxy
 app.set("trust proxy", 1);
 

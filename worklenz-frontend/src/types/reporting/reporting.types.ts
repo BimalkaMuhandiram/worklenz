@@ -20,11 +20,8 @@ export interface IReportingInfo {
 }
 
 export interface IAiChatInfo {
-  id: string;
-  userId: string;
-  createdAt: string;
   content: string;
-  response: string;
+  role: string;
 }
 
 export interface IRPTTeamStatistics {
