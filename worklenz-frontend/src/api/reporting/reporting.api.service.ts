@@ -300,10 +300,16 @@ export const reportingApiService = {
     return response.data;
   },
   getChat: async (
-    body: any | null = null): Promise<IServerResponse<IAiChatInfo>> => {
-    const url = `${API_BASE_URL}/smart-chat/chat`;
-    console.log(body)
-    const response = await apiClient.post<IServerResponse<IAiChatInfo>>(url,{chat: body});
-    return response.data;
-  },
+  message: string
+): Promise<IServerResponse<IAiChatInfo>> => {
+  const url = `${API_BASE_URL}/smart-chat/chat`;
+  console.log("Payload sent to backend:", { message }); // Debug
+
+  const response = await apiClient.post<IServerResponse<IAiChatInfo>>(url, {
+    message, // not { chat: message }
+  });
+
+  return response.data;
+}
+
 };

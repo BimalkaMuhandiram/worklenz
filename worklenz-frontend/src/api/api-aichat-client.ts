@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const apiAiChatClient = axios.create({
   baseURL: import.meta.env.VITE_CHAT_API_URL, // Backend base URL
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',

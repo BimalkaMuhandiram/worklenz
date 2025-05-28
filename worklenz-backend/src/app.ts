@@ -23,8 +23,6 @@ import safeControllerFunction from "./shared/safe-controller-function";
 import AwsSesController from "./controllers/aws-ses-controller";
 import { CSP_POLICIES } from "./shared/csp";
 
-import smartChatApiRouter from './routes/apis/smart-chat-api-router';
-
 const app = express();
 
 // Trust first proxy if behind reverse proxy
@@ -62,21 +60,18 @@ const allowedOrigins = [
       ]
     : [
         "http://localhost:3000",
-        "http://localhost:3001",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001"
+        "http://127.0.0.1:3000"
       ]
 ].flat();
 
 app.use(cors({
   origin: (origin, callback) => {
-    console.log(origin);
-    if (!isProduction() || !origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.log("Blocked origin:", origin, process.env.NODE_ENV);
+      console.log("Blocked origin:", origin);
       callback(new Error("Not allowed by CORS"));
     }
   },
@@ -130,7 +125,7 @@ app.use((req, res, next) => {
   if (
     req.path.startsWith("/webhook/") ||
     req.path.startsWith("/secure/") ||
-
+    req.path.startsWith("/api/") ||
     req.path.startsWith("/public/")
   ) {
     next();
@@ -139,9 +134,16 @@ app.use((req, res, next) => {
   }
 });
 
+app.use((req, res, next) => {
+  console.log('Incoming Request');
+  console.log('Cookies:', req.cookies);
+  console.log('Session:', req.session);
+  next();
+});
+
 // Set CSRF token cookie
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (typeof req.csrfToken === 'function') {
+  if (req.csrfToken) {
     const token = req.csrfToken();
     res.cookie("XSRF-TOKEN", token, {
       httpOnly: false,

@@ -26,6 +26,7 @@ import { useDocumentTitle } from '@/hooks/useDoumentTItle';
 import alertService from '@/services/alerts/alertService';
 import { useAuthService } from '@/hooks/useAuth';
 import { WORKLENZ_REDIRECT_PROJ_KEY } from '@/shared/constants';
+import axios from 'axios';
 
 interface LoginFormValues {
   email: string;
@@ -86,31 +87,47 @@ const LoginPage: React.FC = () => {
   }, [dispatch, navigate, trackMixpanelEvent]);
 
   const onFinish = useCallback(
-    async (values: LoginFormValues) => {
-      try {
-        trackMixpanelEvent(evt_login_with_email_click);
+  async (values: LoginFormValues) => {
+    try {
+      trackMixpanelEvent(evt_login_with_email_click);
 
-        // if (teamId) {
-        //   localStorage.setItem(WORKLENZ_REDIRECT_PROJ_KEY, teamId);
-        // }
+      const result = await dispatch(login(values)).unwrap();
 
-        const result = await dispatch(login(values)).unwrap();
-        if (result.authenticated) {
-          message.success(t('successMessage'));
-          setSession(result.user);
-          dispatch(setUser(result.user));
-          navigate('/auth/authenticating');
+      if (result.authenticated) {
+
+        // 🔄 Refresh CSRF token after successful login
+        await axios.get(`${import.meta.env.VITE_API_URL}/csrf-token`, {
+          withCredentials: true,
+        });
+
+        // ⏳ Ensure token is now available in cookies
+        const token = document.cookie
+          .split('; ')
+          .find(row => row.startsWith('XSRF-TOKEN='));
+
+        if (!token) {
+          throw new Error('CSRF token was not set after login');
         }
-      } catch (error) {
-        logger.error('Login failed', error);
-        alertService.error(
-          t('errorMessages.loginErrorTitle'),
-          t('errorMessages.loginErrorMessage')
-        );
+
+        // ✅ Proceed after confirming CSRF token
+        message.success(t('successMessage'));
+        setSession(result.user);
+        dispatch(setUser(result.user));
+        navigate('/auth/authenticating');
       }
-    },
-    [dispatch, navigate, t, trackMixpanelEvent]
-  );
+    } catch (error: any) {
+      logger.error('Login process failed', error);
+
+      const isCsrfError = error?.message === 'CSRF token was not set after login';
+
+      alertService.error(
+        t('errorMessages.loginErrorTitle'),
+        isCsrfError ? 'Security token setup failed. Please try again.' : t('errorMessages.loginErrorMessage')
+      );
+    }
+  },
+  [dispatch, navigate, t, trackMixpanelEvent]
+);
 
   const handleGoogleLogin = useCallback(() => {
     try {
