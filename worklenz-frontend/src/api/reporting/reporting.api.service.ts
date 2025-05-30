@@ -299,16 +299,9 @@ export const reportingApiService = {
     const response = await apiClient.get<IServerResponse<IMemberProjectsResonse>>(url);
     return response.data;
   },
-  getChat: async (
-  message: string
-): Promise<IServerResponse<IAiChatInfo>> => {
+  getChat: async (body: any): Promise<IServerResponse<IAiChatInfo>> => {
   const url = `${API_BASE_URL}/smart-chat/chat`;
-  console.log("Payload sent to backend:", { message }); // Debug
-
-  const response = await apiClient.post<IServerResponse<IAiChatInfo>>(url, {
-    message, // not { chat: message }
-  });
-
+  const response = await apiClient.post(url, body); 
   return response.data;
 }
 

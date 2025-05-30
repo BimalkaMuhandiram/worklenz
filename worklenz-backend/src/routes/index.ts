@@ -1,3 +1,4 @@
+global.Promise = Promise;
 import express from "express";
 import IndexController from "../controllers/index-controller";
 import safeControllerFunction from "../shared/safe-controller-function";

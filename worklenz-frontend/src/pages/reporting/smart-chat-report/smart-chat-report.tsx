@@ -36,7 +36,7 @@ import {
   XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 
-const md = Markdownit({ html: true, breaks: true });
+const md = Markdownit({ html: false, breaks: true });
 
 const renderAssistantMessage: BubbleProps['messageRender'] = (content) => {
   try {
@@ -133,10 +133,10 @@ const SmartChatReport = () => {
   const [chatMessages, setChatMessages] = useState<IChatMessageWithStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [user, setUser] = useState({});
+  const [user, setUser] = useState<Record<string, any> | null>(null);
   const [teams, setTeams] = useState<IRPTTeam[]>([]);
-  const [selectedTeam, setselectedTeam] = useState({});
-  const [organization, setOrganization] = useState({});
+  const [selectedTeam, setselectedTeam] = useState<Record<string, any> | null>(null);
+  const [organization, setOrganization] = useState<Record<string, any> | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date().toDateString());
   const includeArchivedProjects = useAppSelector(
     (state) => state.reportingReducer.includeArchivedProjects
@@ -202,58 +202,62 @@ const SmartChatReport = () => {
   };
 
   const handleSend = async (inputMessage: string) => {
-    if (!inputMessage.trim() || loading) return;
+  if (!inputMessage.trim() || loading) return;
 
-    const timestamp = new Date().toISOString();
-    const userMessage: IChatMessageWithStatus = {
-      role: 'user',
-      content: inputMessage,
-      timestamp,
-      status: 'pending',
+  const timestamp = new Date().toISOString();
+  const userMessage: IChatMessageWithStatus = {
+    role: 'user',
+    content: inputMessage,
+    timestamp,
+    status: 'pending',
+  };
+
+  const trimmedMessages = [...chatMessages, userMessage]
+    .slice(-20)
+    .map(({ role, content }) => ({ role, content }));
+
+  setChatMessages((prev) => [...prev, userMessage]);
+  setLoading(true);
+  setMessageInput('');
+
+  try {
+    const requestBody = { chat: trimmedMessages }; 
+    const response = await reportingApiService.getChat(requestBody); 
+
+    const responseText =
+      response?.body?.content?.trim() || 'Sorry, no response from assistant.';
+
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.timestamp === timestamp ? { ...msg, status: 'sent' } : msg
+      )
+    );
+
+    setIsTyping(true);
+
+    const aiMessage: IChatMessageWithStatus = {
+      role: 'assistant',
+      content: responseText,
+      timestamp: new Date().toISOString(),
+      status: 'sent',
     };
 
-    const trimmedMessages = [...chatMessages, userMessage].slice(-20);
-
-    setChatMessages((prev) => [...prev, userMessage]);
-    setLoading(true);
-    setMessageInput('');
-
-    try {
-      const response = await reportingApiService.getChat(trimmedMessages);
-      const responseText =
-        response?.body?.content?.trim() || 'Sorry, no response from assistant.';
-
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.timestamp === timestamp ? { ...msg, status: 'sent' } : msg
-        )
-      );
-
-      setIsTyping(true);
-
-      const aiMessage: IChatMessageWithStatus = {
-        role: 'assistant',
-        content: responseText,
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-      };
-
-      setTimeout(() => {
-        setChatMessages((prev) => [...prev, aiMessage]);
-        setIsTyping(false);
-      }, 500);
-    } catch (error) {
-      logger.error('handleSend', error);
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.timestamp === timestamp ? { ...msg, status: 'failed' } : msg
-        )
-      );
+    setTimeout(() => {
+      setChatMessages((prev) => [...prev, aiMessage]);
       setIsTyping(false);
-    } finally {
-      setLoading(false);
-    }
-  };
+    }, 500);
+  } catch (error) {
+    logger.error('handleSend', error);
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.timestamp === timestamp ? { ...msg, status: 'failed' } : msg
+      )
+    );
+    setIsTyping(false);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const retrySend = async (msg: IChatMessageWithStatus) => {
     setChatMessages((prev) => prev.filter((m) => m.timestamp !== msg.timestamp));

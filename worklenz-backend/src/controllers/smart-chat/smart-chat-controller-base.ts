@@ -1,21 +1,17 @@
 import db from "../../config/db";
 import ReportingControllerBase from "../reporting/reporting-controller-base";
-import OpenAI from "openai";
+import { OpenAIService } from './openai-service';
 import { PromptBuilder } from "./prompt-builder";
 
 export default class SmartChatControllerBase extends ReportingControllerBase {
-  // Initialize OpenAI client using static method
   protected static getOpenAiClient() {
-    return new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
+    return OpenAIService.getClient();
   }
 
   protected static getSystemPrompt(data: any) {
     return PromptBuilder.buildSystemPrompt(data);
   }
 
-  // Fetch project details for a team
   protected static async getTeamData(teamId: string) {
     const q = `
       SELECT name, start_date, end_date, last_updated_at, project_status, project_health, project_info
@@ -26,36 +22,6 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return result.rows;
   }
 
-  // Send a list of messages to OpenAI and return the response
-  protected static async createChatCompletion(messages: any[]) {
-    const client = this.getOpenAiClient();
-    const response = await client.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages,
-      temperature: 0.7,
-      max_tokens: 300,
-    });
-    return response.choices[0].message;
-  }
-
-  // Send a single prompt and get response text
-  protected static async getOpenAiResponse(prompt: string): Promise<string> {
-    try {
-      const client = this.getOpenAiClient();
-      const response = await client.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 300,
-      });
-      return response.choices[0].message?.content || "No response from assistant.";
-    } catch (error) {
-      console.error("Error getting OpenAI response:", error);
-      throw new Error("Failed to get response from OpenAI.");
-    }
-  }
-
-  // Generate schema string for specified tables
   protected static async createTableSchema() {
     const tables = (process.env.TABLES || "")
       .split(",")
@@ -127,15 +93,13 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return schema;
   }
 
-  // Return static schema from env
   protected static getTableSchema() {
     return process.env.SCHEMA || "";
   }
 
-  // Use schema & teamId to get AI-generated query, run it and return the result
   protected static async getQueryData(schema: string, teamId: string, messages: any[]) {
     messages.unshift(PromptBuilder.buildQueryPrompt(schema, teamId));
-    const aiResponse = await this.createChatCompletion(messages);
+    const aiResponse = await OpenAIService.createChatCompletion(messages);
 
     const cleaned = aiResponse?.content?.replace(/```json|```/g, "").trim() || "{}";
 
@@ -171,9 +135,8 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
   }
 
-  // Add data to prompt and generate assistant response
   protected static async createChatWithQueryData(dataList: any, messages: any[]) {
     messages.unshift(PromptBuilder.buildResponsePrompt(dataList));
-    return this.createChatCompletion(messages);
+    return OpenAIService.createChatCompletion(messages);
   }
 }

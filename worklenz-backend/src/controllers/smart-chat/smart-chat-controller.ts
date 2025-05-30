@@ -6,6 +6,7 @@ import HandleExceptions from "../../decorators/handle-exceptions";
 import SmartChatControllerBase from "./smart-chat-controller-base";
 import { PromptBuilder } from "./prompt-builder";
 import { ChatLogCreateSchema, ChatInfoRequestSchema } from "./chat.schema";
+import { OpenAIService } from "./openai-service";
 
 // Mocked OpenAI client (swap with real one later)
 const openAiApiClient = {
@@ -87,10 +88,15 @@ export default class SmartchatController extends SmartChatControllerBase {
           };
 
           return res.status(200).send(new ServerResponse(true, JSON.stringify(chartResponse)));
-        } catch (err) {
-          console.error("Chart data error:", err);
-          return res.status(500).send(new ServerResponse(false, "Failed to build chart."));
-        }
+        } catch (err: any) {
+  console.error("Chart data error:", {
+    message: err.message,
+    stack: err.stack,
+    ...err.response?.data && { responseData: err.response.data },
+  });
+  return res.status(500).send(new ServerResponse(false, "Failed to build chart."));
+}
+
       }
 
       const prompt = PromptBuilder.build({
@@ -104,11 +110,11 @@ export default class SmartchatController extends SmartChatControllerBase {
       });
 
       try {
-        const response = await this.getOpenAiResponse(prompt.content);
+        const response = await OpenAIService.getOpenAiResponse(prompt.content);
         return res.status(200).send(new ServerResponse(true, response));
       } catch (err) {
         console.error("OpenAI error:", err);
-        return res.status(502).send(new ServerResponse(false, "AI service failed."));
+        return res.status(502).send(new ServerResponse(false, [] ,"AI service failed."));
       }
     } catch (err) {
       console.error("getChatInfo error:", err);
