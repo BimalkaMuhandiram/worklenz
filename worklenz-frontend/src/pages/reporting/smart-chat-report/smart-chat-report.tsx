@@ -225,7 +225,9 @@ const SmartChatReport = () => {
     const response = await reportingApiService.getChat(requestBody); 
 
     const responseText =
-      response?.body?.content?.trim() || 'Sorry, no response from assistant.';
+      typeof response?.body === 'string'
+        ? (response.body as string).trim()
+        : 'Sorry, no response from assistant.';
 
     setChatMessages((prev) =>
       prev.map((msg) =>
