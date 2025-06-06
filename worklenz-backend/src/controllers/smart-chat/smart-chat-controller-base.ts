@@ -1,6 +1,6 @@
 import db from "../../config/db";
 import ReportingControllerBase from "../reporting/reporting-controller-base";
-import { OpenAIService } from './openai-service';
+import { OpenAIService } from "./openai-service";
 import { PromptBuilder } from "./prompt-builder";
 
 export default class SmartChatControllerBase extends ReportingControllerBase {
@@ -27,6 +27,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
+
     let schema = "";
 
     for (const table of tables) {
@@ -113,7 +114,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       };
     }
 
-    if (!result?.is_query || !result?.query.includes(teamId)) {
+    if (!result?.is_query || !result?.query?.includes(teamId)) {
       return {
         summary: result.summary || "Invalid query.",
         data: [],

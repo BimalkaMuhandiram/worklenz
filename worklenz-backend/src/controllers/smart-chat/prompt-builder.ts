@@ -1,7 +1,15 @@
 import { ChatCompletionMessageParam } from "openai/resources";
 
 // Defines allowed prompt types used by the app
-type PromptType = "system" | "query" | "response" | "few-shot" | "cot" | "hybrid" | "sql-query" | "sql-result";
+type PromptType =
+  | "system"
+  | "query"
+  | "response"
+  | "few-shot"
+  | "cot"
+  | "hybrid"
+  | "sql-query"
+  | "sql-result";
 
 interface PromptInput {
   type: PromptType;
@@ -34,16 +42,15 @@ export class PromptBuilder {
   }
 
   static buildSystemPrompt(data: any): ChatCompletionMessageParam {
-    const jsonStr = JSON.stringify(data, null, 2);
     return {
       role: "system",
       content: `
 You are a smart assistant for the Worklenz project management platform. Help users manage tasks, timelines, and team collaboration using natural conversation.
 
 ## Context
-\\\ json
-${jsonStr}
-\\\
+\`\`\`json
+${JSON.stringify(data, null, 2)}
+\`\`\`
 
 ## Responsibilities
 - Understand various user message types (updates, summaries, questions, assignments).
@@ -53,7 +60,7 @@ ${jsonStr}
 
 ## Format
 - Use markdown.
-- Use \\backticks\\ for task names, people, dates.
+- Use \`backticks\` for task names, people, and dates.
 - Never expose raw JSON or internal IDs.
 
 Respond clearly and use a helpful, confident tone.
@@ -68,9 +75,9 @@ Respond clearly and use a helpful, confident tone.
 You are an intelligent assistant for Worklenz. Analyze the user's input and determine the most likely intent: query, update, create, or summarize.
 
 ## Context
-\\\json
+\`\`\`json
 ${JSON.stringify(data.context || {}, null, 2)}
-\\\
+\`\`\`
 
 ## Instructions
 - If user asks a question: respond based on provided data.
@@ -87,25 +94,26 @@ Reply in markdown. Keep responses concise, with clear action suggestions.
     return {
       role: "system",
       content: `
-You are a database-aware assistant. Translate natural queries into PostgreSQL SELECT using the schema.
+You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema.
 
 ## Schema
-\\\
+\`\`\`
 ${schema}
-\\\
+\`\`\`
 
 - Only generate SELECT queries.
-- Add \\in_organization(team_id, '${teamId}')\\.
-- LIMIT 100. Skip ID, color fields.
+- Ensure the WHERE clause includes: \`in_organization(team_id, '${teamId}')\`
+- LIMIT results to 100.
+- Skip internal or irrelevant fields like id, color.
 
 Return:
-\\\ json
+\`\`\`json
 {
   "summary": "...",
   "query": "...",
-  "is_query": true|false
+  "is_query": true | false
 }
-\\\
+\`\`\`
       `.trim(),
     };
   }
@@ -117,17 +125,18 @@ Return:
 You are a project assistant. Use the provided data to answer the user's question.
 
 ## Data
-\\\ json
+\`\`\`json
 ${dataList}
-\\\
+\`\`\`
 
-## Rules
-- Summarize results.
+## Instructions
+- Summarize the results clearly.
 - Highlight overdue or high-priority items.
-- Offer to assist further (e.g., update deadline?).
-- Limit to 10 results. Use \\backticks\\ for names/dates.
+- Suggest helpful next actions (e.g., update a deadline).
+- Limit output to the top 10 results.
+- Use \`backticks\` for names and dates.
 
-Say "No data found" if empty.
+Say "No data found" if the list is empty.
       `.trim(),
     };
   }
@@ -143,12 +152,12 @@ Say "No data found" if empty.
     return {
       role: "system",
       content: `
-You are a helpful project management assistant. Follow the patterns shown in examples.
+You are a helpful project management assistant. Follow the pattern of the examples below.
 
-## Examples:
+## Examples
 ${formattedExamples}
 
-## Current Message:
+## Current Message
 User: ${data.query}
       `.trim(),
     };
@@ -158,52 +167,63 @@ User: ${data.query}
     return {
       role: "system",
       content: `
-Let's reason this through.
+Let's reason through the following task.
 
 ## Context
-\\\ json
+\`\`\`json
 ${JSON.stringify(data, null, 2)}
-\\\
+\`\`\`
 
-1. Understand the request.
-2. Identify user intent (ask/update/assign).
-3. Check for missing info.
-4. Respond clearly and suggest next steps.
+1. Understand the user request.
+2. Identify the intent (question, update, assign, etc.).
+3. Look for missing or ambiguous information.
+4. Respond in clear steps and suggest next actions.
       `.trim(),
     };
   }
 
   static buildSQLQueryPrompt(data: {
-    userMessage: string;
-    schema: any;
-    userId: string;
-    teamId: string;
-  }): ChatCompletionMessageParam {
-    return {
-      role: "system",
-      content: `
-You are a SQL assistant. Based on the schema and user message, generate a PostgreSQL SELECT query.
+  userMessage: string;
+  schema: any;
+  userId: string;
+  teamId: string;
+}): ChatCompletionMessageParam {
+  return {
+    role: "system",
+    content: `
+You are a PostgreSQL SQL assistant. Generate a SELECT query based on the schema and user message.
 
 ## Schema
-\\\ json
+\\\json
 ${JSON.stringify(data.schema, null, 2)}
 \\\
 
-## Message
+## User Message
 "${data.userMessage}"
 
-## Context
-- Only generate SELECT queries.
-- Use team_id = '${data.teamId}' if needed.
-- Use user_id = '${data.userId}' if relevant.
-- Wrap all output in JSON like:
+## Guidelines
+- Only generate **SELECT** queries.
+- Before using a column in WHERE clause, **make sure it exists** in the relevant table.
+- If the table includes \`team_id\`, filter by: \`team_id = '${data.teamId}'\`.
+- If the table includes \`user_id\`, filter by: \`user_id = '${data.userId}'\`.
+- Avoid using columns like \`color\`, \`internal_id\`, etc., unless explicitly requested.
+- Limit results to 100 rows.
+- Never use DROP/INSERT/UPDATE/DELETE.
+
+## Output Format
+Respond with JSON:
+\`\`\`json
 {
-  "intent": "List user's ongoing projects",
-  "query": "SELECT name FROM Projects WHERE status = 'ongoing' AND user_id = '${data.userId}'"
+  "intent": "Summarize overdue tasks by owner",
+  "query": "SELECT ..."
 }
-      `.trim(),
-    };
-  }
+\`\`\`
+
+Make sure the SQL query is valid and safe to run.
+    `.trim(),
+  };
+}
+
 
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
@@ -212,18 +232,21 @@ ${JSON.stringify(data.schema, null, 2)}
     return {
       role: "system",
       content: `
-You are a helpful assistant. Turn the database result into a user-friendly summary.
+You are a helpful assistant. Convert the SQL query result into a human-readable summary.
 
-## Original Question
+## User Question
 "${data.userMessage}"
 
 ## Query Result
-\\\ json
+\`\`\`json
 ${JSON.stringify(data.queryResult, null, 2)}
-\\\
+\`\`\`
 
-If the result is empty, say "No data found."
-Otherwise, summarize clearly in markdown using bullet points or tables if appropriate.
+## Instructions
+- If the result is empty, say: "No data found."
+- Otherwise, summarize clearly in markdown.
+- Use bullet points or tables where appropriate.
+- Highlight key findings and offer to help with follow-up.
       `.trim(),
     };
   }

@@ -56,35 +56,21 @@ export default class SmartchatController extends SmartChatControllerBase {
       }
 
       // === STEP 1: Generate SQL Query ===
-      const queryPrompt = PromptBuilder.buildSQLQueryPrompt({
+      const queryResponseObj = await SmartChatControllerBase.getSQLQueryFromMessage({
         userMessage,
-        schema,
         userId,
-        teamId
+        teamId,
+        schema,
       });
 
-      const contentString = typeof queryPrompt.content === "string" ? queryPrompt.content : "";
-      console.log("Prompt to OpenAI (SQL generation):", contentString);
-
-      const queryResponse = await OpenAIService.getOpenAiResponse(contentString);
-      console.log("OpenAI raw response:", queryResponse);
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(queryResponse);
-      } catch (err) {
-        console.error("Failed to parse OpenAI response:", err);
-        return res.status(400).send(new ServerResponse(false, "Failed to parse query response."));
-      }
-
-      const sqlQuery = parsed?.query;
-      if (!sqlQuery || typeof sqlQuery !== "string" || sqlQuery.trim() === "") {
+      if (!queryResponseObj || typeof queryResponseObj.query !== "string" || queryResponseObj.query.trim() === "") {
         return res.status(400).send(new ServerResponse(false, "No valid SQL query generated."));
       }
 
-      // === STEP 2: Execute the SQL Query ===
+      const sqlQuery = queryResponseObj.query.trim();
       console.log("Generated SQL Query:", sqlQuery);
 
+      // === STEP 2: Execute the SQL Query ===
       let dbResult;
       try {
         const queryResult = await db.query(sqlQuery);
@@ -99,20 +85,15 @@ export default class SmartchatController extends SmartChatControllerBase {
       }
 
       // === STEP 3: Generate Final Natural Language Answer ===
-      const finalPrompt = PromptBuilder.buildAnswerFromResultsPrompt({
+      const answer = await SmartChatControllerBase.getAnswerFromQueryResult({
         userMessage,
-        queryResult: dbResult,
+        result: dbResult,
       });
 
-      console.log("Prompt to OpenAI (Answer Generation):", finalPrompt.content);
+      console.log("AI Answer:", answer);
 
-      const finalResponse = await OpenAIService.getOpenAiResponse(
-        typeof finalPrompt.content === "string" ? finalPrompt.content : ""
-      );
+      return res.status(200).send(new ServerResponse(true, answer.content));
 
-      console.log("OpenAI Final Response:", finalResponse);
-
-      return res.status(200).send(new ServerResponse(true, finalResponse));
     } catch (err) {
       console.error("getChatInfo error:", err);
       return res.status(500).send(new ServerResponse(false, "Unexpected error."));
