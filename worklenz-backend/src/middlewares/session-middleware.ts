@@ -8,20 +8,20 @@ const pgSession = require("connect-pg-simple")(session);
 export default session({
   name: process.env.SESSION_NAME,
   secret: process.env.SESSION_SECRET || "development-secret-key",
-  proxy: false,
   resave: false,
   saveUninitialized: true,
   rolling: true,
+  proxy: isProduction(),
   store: new pgSession({
     pool: db.pool,
-    tableName: "pg_sessions"
+    tableName: "pg_sessions",
   }),
   cookie: {
     path: "/",
-    // secure: isProduction(),
-    // httpOnly: isProduction(),
-    // sameSite: "none",
-    // domain: isProduction() ? ".worklenz.com" : undefined,
-    maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-  }
+    secure: isProduction(),
+    httpOnly: isProduction(),
+    sameSite: isProduction() ? "none" : "lax",
+    domain: isProduction() ? ".worklenz.com" : undefined,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+  },
 });

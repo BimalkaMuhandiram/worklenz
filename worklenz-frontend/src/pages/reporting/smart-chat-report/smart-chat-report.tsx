@@ -138,6 +138,7 @@ const SmartChatReport = () => {
   const [selectedTeam, setselectedTeam] = useState<Record<string, any> | null>(null);
   const [organization, setOrganization] = useState<Record<string, any> | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date().toDateString());
+
   const includeArchivedProjects = useAppSelector(
     (state) => state.reportingReducer.includeArchivedProjects
   );
@@ -179,17 +180,32 @@ const SmartChatReport = () => {
     setEditingContent('');
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!editingContent.trim()) {
       antdMessage.error('Message cannot be empty.');
       return;
     }
+
+    const editedIndex = chatMessages.findIndex(
+      (msg) => msg.timestamp === editingMessageId
+    );
+
+    if (editedIndex === -1) {
+      antdMessage.error('Message not found.');
+      cancelEdit();
+      return;
+    }
+
     setChatMessages((prev) =>
-      prev.map((msg) =>
-        msg.timestamp === editingMessageId ? { ...msg, content: editingContent } : msg
+      prev.map((msg, index) =>
+        index === editedIndex
+          ? { ...msg, content: editingContent, status: 'pending' }
+          : msg
       )
     );
+
     cancelEdit();
+    await handleSend(editingContent, true); // Use retry flag to avoid adding new message
   };
 
   const deleteMessage = (id: string) => {
@@ -201,69 +217,78 @@ const SmartChatReport = () => {
     handleSend(info.data.description as string);
   };
 
-  const handleSend = async (inputMessage: string) => {
-  if (!inputMessage.trim() || loading) return;
+  const handleSend = async (inputMessage: string, isRetry = false) => {
+    if (!inputMessage.trim() || loading) return;
 
-  const timestamp = new Date().toISOString();
-  const userMessage: IChatMessageWithStatus = {
-    role: 'user',
-    content: inputMessage,
-    timestamp,
-    status: 'pending',
-  };
+    const timestamp = new Date().toISOString();
 
-  const trimmedMessages = [...chatMessages, userMessage]
-    .slice(-20)
-    .map(({ role, content }) => ({ role, content }));
+    if (!isRetry) {
+      const userMessage: IChatMessageWithStatus = {
+        role: 'user',
+        content: inputMessage,
+        timestamp,
+        status: 'pending',
+      };
+      setChatMessages((prev) => [...prev, userMessage]);
+    }
 
-  setChatMessages((prev) => [...prev, userMessage]);
-  setLoading(true);
-  setMessageInput('');
+    const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
+      .slice(-20)
+      .map(({ role, content }) => ({ role, content }));
 
-  try {
-    const requestBody = { chat: trimmedMessages }; 
-    const response = await reportingApiService.getChat(requestBody); 
+    setLoading(true);
+    setMessageInput('');
 
-    const responseText =
-      typeof response?.body === 'string'
-        ? (response.body as string).trim()
-        : 'Sorry, no response from assistant.';
+    try {
+      const requestBody = { chat: trimmedMessages };
+      const response = await reportingApiService.getChat(requestBody);
 
-    setChatMessages((prev) =>
-      prev.map((msg) =>
-        msg.timestamp === timestamp ? { ...msg, status: 'sent' } : msg
-      )
-    );
+      const responseText =
+        typeof response?.body === 'string'
+          ? (response.body as string).trim()
+          : 'Sorry, no response from assistant.';
 
-    setIsTyping(true);
+      if (!isRetry) {
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.content === inputMessage && msg.status === 'pending'
+              ? { ...msg, status: 'sent' }
+              : msg
+          )
+        );
+      }
 
-    const aiMessage: IChatMessageWithStatus = {
-      role: 'assistant',
-      content: responseText,
-      timestamp: new Date().toISOString(),
-      status: 'sent',
-    };
+      setIsTyping(true);
 
-    setTimeout(() => {
-      setChatMessages((prev) => [...prev, aiMessage]);
+      const aiMessage: IChatMessageWithStatus = {
+        role: 'assistant',
+        content: responseText,
+        timestamp: new Date().toISOString(),
+        status: 'sent',
+      };
+
+      setTimeout(() => {
+        setChatMessages((prev) => [...prev, aiMessage]);
+        setIsTyping(false);
+      }, 500);
+    } catch (error) {
+      logger.error('handleSend', error);
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.content === inputMessage && msg.role === 'user'
+            ? { ...msg, status: 'failed' }
+            : msg
+        )
+      );
       setIsTyping(false);
-    }, 500);
-  } catch (error) {
-    logger.error('handleSend', error);
-    setChatMessages((prev) =>
-      prev.map((msg) =>
-        msg.timestamp === timestamp ? { ...msg, status: 'failed' } : msg
-      )
-    );
-    setIsTyping(false);
-  } finally {
-    setLoading(false);
-  }
-};
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const retrySend = async (msg: IChatMessageWithStatus) => {
     setChatMessages((prev) => prev.filter((m) => m.timestamp !== msg.timestamp));
-    await handleSend(msg.content);
+    await handleSend(msg.content, true);
   };
 
   const containerStyle = css`

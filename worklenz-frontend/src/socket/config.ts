@@ -6,5 +6,6 @@ export const SOCKET_CONFIG = {
     transports: ['websocket'],
     path: '/socket',
     upgrade: true,
+    withCredentials: true,
   },
 };

@@ -8,13 +8,6 @@ import { PromptBuilder } from "./prompt-builder";
 import { ChatLogCreateSchema, ChatInfoRequestSchema } from "./chat.schema";
 import { OpenAIService } from "./openai-service";
 
-// Mocked OpenAI client (swap with real one later)
-const openAiApiClient = {
-  async sendPrompt(prompt: string): Promise<string> {
-    return "This is a mock response based on the prompt: " + prompt;
-  },
-};
-
 export default class SmartchatController extends SmartChatControllerBase {
   @HandleExceptions()
   public static async create(req: IWorkLenzRequest, res: IWorkLenzResponse): Promise<IWorkLenzResponse> {
@@ -43,8 +36,10 @@ export default class SmartchatController extends SmartChatControllerBase {
   public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): Promise<IWorkLenzResponse> {
     try {
       const teamId = this.getCurrentTeamId(req);
-      if (!teamId) {
-        return res.status(400).send(new ServerResponse(false, "Team ID missing."));
+      const userId = req.user?.id;
+
+      if (!teamId || !userId) {
+        return res.status(400).send(new ServerResponse(false, "Team or User ID missing."));
       }
 
       const validation = ChatInfoRequestSchema.safeParse(req.body);
@@ -53,69 +48,71 @@ export default class SmartchatController extends SmartChatControllerBase {
       }
 
       const { chat: messages } = validation.data;
-      const recentMessages = messages.slice(-5);
-      const userMessage = recentMessages[recentMessages.length - 1]?.content || "";
+      const userMessage = messages[messages.length - 1]?.content || "";
 
       const schema = this.getTableSchema();
       if (!schema) {
         return res.status(400).send(new ServerResponse(false, "Schema not found."));
       }
 
-      const isChartRequest = /(chart|graph|plot|visualize|compare|trend|bar|line|status|tasks by|progress)/i.test(userMessage);
-
-      if (isChartRequest) {
-        try {
-          const queryData: any = await this.getQueryData(schema, teamId, recentMessages);
-
-          let chartData: any[] = [];
-
-          if (Array.isArray(queryData)) {
-            chartData = queryData.map((item: any) => ({
-              name: item.team_name ?? "Unknown Team",
-              Completed: item.completed ?? 0,
-              InProgress: item.in_progress ?? 0,
-              Pending: item.pending ?? 0,
-            }));
-          } else {
-            console.warn("Expected array for queryData but got:", typeof queryData);
-          }
-
-          const chartResponse = {
-            type: "chart",
-            chartType: "bar",
-            title: "Task Status by Team",
-            data: chartData,
-          };
-
-          return res.status(200).send(new ServerResponse(true, JSON.stringify(chartResponse)));
-        } catch (err: any) {
-  console.error("Chart data error:", {
-    message: err.message,
-    stack: err.stack,
-    ...err.response?.data && { responseData: err.response.data },
-  });
-  return res.status(500).send(new ServerResponse(false, "Failed to build chart."));
-}
-
-      }
-
-      const prompt = PromptBuilder.build({
-        type: "hybrid",
-        data: {
-          context: {
-            messages: recentMessages,
-            teamId,
-          },
-        },
+      // === STEP 1: Generate SQL Query ===
+      const queryPrompt = PromptBuilder.buildSQLQueryPrompt({
+        userMessage,
+        schema,
+        userId,
+        teamId
       });
 
+      const contentString = typeof queryPrompt.content === "string" ? queryPrompt.content : "";
+      console.log("Prompt to OpenAI (SQL generation):", contentString);
+
+      const queryResponse = await OpenAIService.getOpenAiResponse(contentString);
+      console.log("OpenAI raw response:", queryResponse);
+
+      let parsed: any;
       try {
-        const response = await OpenAIService.getOpenAiResponse(prompt.content);
-        return res.status(200).send(new ServerResponse(true, response));
+        parsed = JSON.parse(queryResponse);
       } catch (err) {
-        console.error("OpenAI error:", err);
-        return res.status(502).send(new ServerResponse(false, [] ,"AI service failed."));
+        console.error("Failed to parse OpenAI response:", err);
+        return res.status(400).send(new ServerResponse(false, "Failed to parse query response."));
       }
+
+      const sqlQuery = parsed?.query;
+      if (!sqlQuery || typeof sqlQuery !== "string" || sqlQuery.trim() === "") {
+        return res.status(400).send(new ServerResponse(false, "No valid SQL query generated."));
+      }
+
+      // === STEP 2: Execute the SQL Query ===
+      console.log("Generated SQL Query:", sqlQuery);
+
+      let dbResult;
+      try {
+        const queryResult = await db.query(sqlQuery);
+        dbResult = queryResult.rows;
+      } catch (err: any) {
+        console.error("SQL execution error:", {
+          error: err.message,
+          sql: sqlQuery,
+          stack: err.stack,
+        });
+        return res.status(500).send(new ServerResponse(false, "Query execution failed."));
+      }
+
+      // === STEP 3: Generate Final Natural Language Answer ===
+      const finalPrompt = PromptBuilder.buildAnswerFromResultsPrompt({
+        userMessage,
+        queryResult: dbResult,
+      });
+
+      console.log("Prompt to OpenAI (Answer Generation):", finalPrompt.content);
+
+      const finalResponse = await OpenAIService.getOpenAiResponse(
+        typeof finalPrompt.content === "string" ? finalPrompt.content : ""
+      );
+
+      console.log("OpenAI Final Response:", finalResponse);
+
+      return res.status(200).send(new ServerResponse(true, finalResponse));
     } catch (err) {
       console.error("getChatInfo error:", err);
       return res.status(500).send(new ServerResponse(false, "Unexpected error."));

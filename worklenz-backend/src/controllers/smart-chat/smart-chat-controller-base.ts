@@ -139,4 +139,50 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     messages.unshift(PromptBuilder.buildResponsePrompt(dataList));
     return OpenAIService.createChatCompletion(messages);
   }
+
+  // 🆕 Generate SQL query from user message
+  protected static async getSQLQueryFromMessage({
+    userMessage,
+    userId,
+    teamId,
+    schema,
+  }: {
+    userMessage: string;
+    userId: string;
+    teamId: string;
+    schema: any;
+  }) {
+    const prompt = PromptBuilder.buildSQLQueryPrompt({
+      userMessage,
+      userId,
+      teamId,
+      schema,
+    });
+
+    const res = await OpenAIService.createChatCompletion([prompt]);
+
+    try {
+      const content = res?.content?.replace(/```json|```/g, "").trim() || "{}";
+      return JSON.parse(content);
+    } catch (err) {
+      console.error("Failed to parse SQL query from AI response:", err);
+      return null;
+    }
+  }
+
+  // 🆕 Convert SQL result to human-friendly message
+  protected static async getAnswerFromQueryResult({
+    userMessage,
+    result,
+  }: {
+    userMessage: string;
+    result: any[];
+  }) {
+    const prompt = PromptBuilder.buildAnswerFromResultsPrompt({
+      userMessage,
+      queryResult: result,
+    });
+
+    return OpenAIService.createChatCompletion([prompt]);
+  }
 }

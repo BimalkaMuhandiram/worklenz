@@ -32,7 +32,8 @@ const io = new Server(server, {
   transports: ["websocket"],
   path: "/socket",
   cors: {
-    origin: (process.env.SOCKET_IO_CORS || "*").split(",")
+    origin: (process.env.SOCKET_IO_CORS || "*").split(","),
+    credentials: true,
   },
   cookie: true
 });
@@ -42,7 +43,10 @@ const wrap = (middleware: any) => (socket: any, next: any) => middleware(socket.
 io.use(wrap(sessionMiddleware));
 
 io.use((socket, next) => {
+  console.log("🧩 Handshake headers:", socket.handshake.headers);
+  console.log("🧩 Cookies:", socket.request.headers.cookie);
   const userId = getLoggedInUserIdFromSocket(socket);
+  console.log("🧩 User ID:", userId);
   if (userId)
     return next();
   return next(new Error("401 unauthorized"));
