@@ -301,8 +301,8 @@ export const reportingApiService = {
   },
   getChat: async (body: any): Promise<IServerResponse<IAiChatInfo>> => {
   const url = `${API_BASE_URL}/smart-chat/chat`;
-  const response = await apiClient.post(url, body); 
-  return response.data;
+  const response = await apiClient.post(url, body);
+  return response.data; 
 }
 
 };

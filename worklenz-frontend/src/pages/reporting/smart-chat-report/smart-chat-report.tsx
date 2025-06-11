@@ -138,7 +138,8 @@ const SmartChatReport = () => {
   const [selectedTeam, setselectedTeam] = useState<Record<string, any> | null>(null);
   const [organization, setOrganization] = useState<Record<string, any> | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date().toDateString());
-
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  
   const includeArchivedProjects = useAppSelector(
     (state) => state.reportingReducer.includeArchivedProjects
   );
@@ -148,6 +149,7 @@ const SmartChatReport = () => {
   const [editingContent, setEditingContent] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+  
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -217,73 +219,85 @@ const SmartChatReport = () => {
     handleSend(info.data.description as string);
   };
 
-  const handleSend = async (inputMessage: string, isRetry = false) => {
-    if (!inputMessage.trim() || loading) return;
+const handleSend = async (inputMessage: string, isRetry = false) => {
+  if (!inputMessage.trim() || loading) return;
 
-    const timestamp = new Date().toISOString();
+  const timestamp = new Date().toISOString();
 
-    if (!isRetry) {
-      const userMessage: IChatMessageWithStatus = {
-        role: 'user',
-        content: inputMessage,
-        timestamp,
-        status: 'pending',
-      };
-      setChatMessages((prev) => [...prev, userMessage]);
+  if (!isRetry) {
+    const userMessage: IChatMessageWithStatus = {
+      role: 'user',
+      content: inputMessage,
+      timestamp,
+      status: 'pending',
+    };
+    setChatMessages((prev) => [...prev, userMessage]);
+  }
+
+  const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
+    .slice(-20)
+    .map(({ role, content }) => ({ role, content }));
+
+  setLoading(true);
+  setMessageInput('');
+  setIsTyping(true);
+
+  try {
+    const requestBody = { chat: trimmedMessages };
+    const response = await reportingApiService.getChat(requestBody);
+
+    let responseText = 'Sorry, no response from assistant.';
+    let newSuggestions: string[] = [];
+
+    if (response?.body) {
+      responseText = response.body.answer || responseText;
+      newSuggestions = response.body.suggestions || [];
     }
 
-    const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
-      .slice(-20)
-      .map(({ role, content }) => ({ role, content }));
-
-    setLoading(true);
-    setMessageInput('');
-
-    try {
-      const requestBody = { chat: trimmedMessages };
-      const response = await reportingApiService.getChat(requestBody);
-
-      const responseText =
-        typeof response?.body === 'string'
-          ? (response.body as string).trim()
-          : 'Sorry, no response from assistant.';
-
-      if (!isRetry) {
-        setChatMessages((prev) =>
-          prev.map((msg) =>
-            msg.content === inputMessage && msg.status === 'pending'
-              ? { ...msg, status: 'sent' }
-              : msg
-          )
-        );
-      }
-
-      setIsTyping(true);
-
-      const aiMessage: IChatMessageWithStatus = {
-        role: 'assistant',
-        content: responseText,
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-      };
-
-      setTimeout(() => {
-        setChatMessages((prev) => [...prev, aiMessage]);
-        setIsTyping(false);
-      }, 500);
-    } catch (error) {
-      logger.error('handleSend', error);
+    if (!isRetry) {
       setChatMessages((prev) =>
         prev.map((msg) =>
-          msg.content === inputMessage && msg.role === 'user'
-            ? { ...msg, status: 'failed' }
+          msg.content === inputMessage && msg.status === 'pending'
+            ? { ...msg, status: 'sent' }
             : msg
         )
       );
-      setIsTyping(false);
-    } finally {
-      setLoading(false);
     }
+
+    setSuggestions(newSuggestions);
+
+    const aiMessage: IChatMessageWithStatus = {
+      role: 'assistant',
+      content: responseText,
+      timestamp: new Date().toISOString(),
+      status: 'sent',
+    };
+
+    setTimeout(() => {
+      setChatMessages((prev) => [...prev, aiMessage]);
+      setIsTyping(false);
+    }, 500);
+  } catch (error) {
+    logger.error('handleSend', error);
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.content === inputMessage && msg.role === 'user'
+          ? { ...msg, status: 'failed' }
+          : msg
+      )
+    );
+    setIsTyping(false);
+    antdMessage.error('Failed to send message. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+   // Handle suggestion click to send follow-up question immediately
+  const onSuggestionClick = (suggestion: string) => {
+    setMessageInput(suggestion);
+    handleSend(suggestion);
   };
 
   const retrySend = async (msg: IChatMessageWithStatus) => {
@@ -438,6 +452,33 @@ const SmartChatReport = () => {
           <Bubble role="assistant" typing={{ step: 1, interval: 40 }} content="..." />
         )}
 
+        {suggestions.length > 0 && (
+  <div
+    style={{
+      backgroundColor: 'var(--assistant-bubble-bg)',
+      padding: '12px',
+      borderRadius: '12px',
+      marginTop: '8px',
+      maxWidth: '80%',
+      alignSelf: 'flex-start',
+    }}
+  >
+    <Typography.Text strong>Suggestions:</Typography.Text>
+    <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+      {suggestions.map((suggestion, index) => (
+        <li
+          key={index}
+          style={{ cursor: 'pointer', color: '#1890ff', marginBottom: '6px' }}
+          onClick={() => onSuggestionClick(suggestion)}
+        >
+          {suggestion}
+        </li>
+      ))}
+    </ul>
+  </div>
+)}
+
+
         {showPrompts && (
           <>
             <Welcome
@@ -469,6 +510,7 @@ const SmartChatReport = () => {
           </>
         )}
         <div ref={chatEndRef} />
+        
       </Flex>
 
       <Flex justify="center" align="flex-end" style={{ fontSize: '5em' }} vertical>

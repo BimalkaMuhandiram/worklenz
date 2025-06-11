@@ -20,8 +20,12 @@ export interface IReportingInfo {
 }
 
 export interface IAiChatInfo {
-  content: string;
   role: string;
+  content?: string;
+  answer?: string;
+  suggestions?: string[];
+  refusal?: string;
+  annotations?: any[];
 }
 
 export interface IRPTTeamStatistics {

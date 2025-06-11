@@ -92,7 +92,21 @@ export default class SmartchatController extends SmartChatControllerBase {
 
       console.log("AI Answer:", answer);
 
-      return res.status(200).send(new ServerResponse(true, answer.content));
+      // === STEP 4: Generate Follow-up Suggestions ===
+      const assistantContent = answer.content ?? ""; // fallback empty string if null
+
+      const suggestions = await OpenAIService.generateFollowUpSuggestions(
+        userMessage,
+        assistantContent
+      );
+
+      // === STEP 5: Return Full Response ===
+      return res.status(200).send(
+        new ServerResponse(true, {
+          answer: answer.content,
+          suggestions,
+      })
+      );
 
     } catch (err) {
       console.error("getChatInfo error:", err);
