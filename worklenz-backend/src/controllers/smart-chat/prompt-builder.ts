@@ -255,6 +255,7 @@ Make sure the SQL is syntactically valid and safe to run. Use proper table alias
   };
 }
 
+
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
     queryResult: any[];
