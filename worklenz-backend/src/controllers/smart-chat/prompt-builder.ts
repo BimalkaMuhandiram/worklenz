@@ -84,6 +84,13 @@ ${JSON.stringify(data.context || {}, null, 2)}
 - If user gives an update: confirm before applying.
 - If unclear, ask a clarifying question.
 
+## Examples of clarifications
+User: "Show me tasks by Andrew."
+Assistant: "Do you want tasks assigned to Andrew or created by Andrew? Also, which project or team should I look at?"
+
+User: "What is the status?"
+Assistant: "Could you please specify which task or project you are referring to?"
+
 ## Output
 Reply in markdown. Keep responses concise, with clear action suggestions.
       `.trim(),
@@ -145,6 +152,28 @@ Say "No data found" if the list is empty.
     data: any,
     examples: { user: string; assistant: string }[]
   ): ChatCompletionMessageParam {
+    // If no examples provided, add default few-shot examples
+    if (examples.length === 0) {
+      examples = [
+        {
+          user: "Show me all tasks assigned to John in project Alpha.",
+          assistant: `{
+  "summary": "Tasks assigned to John in project Alpha",
+  "query": "SELECT * FROM tasks WHERE assignee = 'John' AND project_name = 'Alpha' AND team_id = '...' LIMIT 100",
+  "is_query": true
+}`
+        },
+        {
+          user: "List overdue tasks.",
+          assistant: `{
+  "summary": "Overdue tasks",
+  "query": "SELECT * FROM tasks WHERE due_date < CURRENT_DATE AND status != 'completed' AND team_id = '...' LIMIT 100",
+  "is_query": true
+}`
+        },
+      ];
+    }
+
     const formattedExamples = examples
       .map((e) => `User: ${e.user}\nAssistant: ${e.assistant}`)
       .join("\n\n");
@@ -194,36 +223,37 @@ ${JSON.stringify(data, null, 2)}
 You are a PostgreSQL SQL assistant. Generate a SELECT query based on the schema and user message.
 
 ## Schema
-\\\json
+\`\`\`json
 ${JSON.stringify(data.schema, null, 2)}
-\\\
+\`\`\`
 
 ## User Message
 "${data.userMessage}"
 
 ## Guidelines
-- Only generate **SELECT** queries.
-- Before using a column in WHERE clause, **make sure it exists** in the relevant table.
-- If the table includes \`team_id\`, filter by: \`team_id = '${data.teamId}'\`.
-- If the table includes \`user_id\`, filter by: \`user_id = '${data.userId}'\`.
-- Avoid using columns like \`color\`, \`internal_id\`, etc., unless explicitly requested.
+- Only generate SELECT queries.
+- Use only valid table aliases. Never reference aliases that are not explicitly defined in the FROM or JOIN clauses.
+- Do not make up table or column names — strictly use what's in the schema.
+- For UUID columns like project_id, team_id, user_id:
+  - If filtering by name, use subqueries to resolve UUIDs, e.g.:
+    \`project_id = (SELECT id FROM projects WHERE name = 'Project Name')\`
+- Ensure JOINs have valid relationships as per the schema.
 - Limit results to 100 rows.
-- Never use DROP/INSERT/UPDATE/DELETE.
+- Never generate DROP/INSERT/UPDATE/DELETE queries.
 
 ## Output Format
 Respond with JSON:
 \`\`\`json
 {
-  "intent": "Summarize overdue tasks by owner",
+  "intent": "...",
   "query": "SELECT ..."
 }
 \`\`\`
 
-Make sure the SQL query is valid and safe to run.
+Make sure the SQL is syntactically valid and safe to run. Use proper table aliases and JOIN logic.
     `.trim(),
   };
 }
-
 
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
@@ -244,6 +274,7 @@ ${JSON.stringify(data.queryResult, null, 2)}
 
 ## Instructions
 - If the result is empty, say: "No data found."
+- If the query was invalid or failed, say: "Sorry, I couldn't retrieve data. Please check your request."
 - Otherwise, summarize clearly in markdown.
 - Use bullet points or tables where appropriate.
 - Highlight key findings and offer to help with follow-up.

@@ -1,12 +1,18 @@
 import OpenAI from "openai";
-import type {
+import {
   ChatCompletionMessageParam,
   ChatCompletionMessage,
   ChatCompletionContentPart,
   ChatCompletionContentPartText,
 } from "openai/resources";
+import { encoding_for_model, TiktokenModel } from "tiktoken";
 
 export class OpenAIService {
+  private static readonly MODEL = "gpt-3.5-turbo";
+  private static readonly MODEL_TYPED = "gpt-3.5-turbo" as TiktokenModel;
+  private static readonly MAX_TOKENS = 4096;
+  private static readonly RESPONSE_TOKENS = 1000;
+
   private static client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY!,
   });
@@ -15,61 +21,157 @@ export class OpenAIService {
     return this.client;
   }
 
+  private static countTokens(
+    messages: ChatCompletionMessageParam[],
+    model: TiktokenModel
+  ): number {
+    const encoder = encoding_for_model(model);
+    let tokens = 0;
+
+    for (const msg of messages) {
+      tokens += 4; // every message overhead
+      if (typeof msg.content === "string") {
+        tokens += encoder.encode(msg.content).length;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if ("text" in part && typeof part.text === "string") {
+            tokens += encoder.encode(part.text).length;
+          }
+        }
+      }
+    }
+
+    tokens += 2; // priming tokens
+    encoder.free();
+    return tokens;
+  }
+
+  private static truncateTextToFitTokens(
+    text: string,
+    maxTokens: number,
+    encoder: ReturnType<typeof encoding_for_model>
+  ): string {
+    const encoded = encoder.encode(text);
+    if (encoded.length <= maxTokens) return text;
+
+    // Simple heuristic to avoid cutting mid-word:
+    // Find approximate cutoff position in characters by assuming ~4 chars per token.
+    const approxCutoff = maxTokens * 4;
+    return text.slice(0, approxCutoff);
+  }
+
+  private static trimMessagesToFitTokenLimit(
+    messages: ChatCompletionMessageParam[],
+    maxTokens: number,
+    model: TiktokenModel
+  ): ChatCompletionMessageParam[] {
+    const encoder = encoding_for_model(model);
+    const trimmedMessages: ChatCompletionMessageParam[] = [];
+    let totalTokens = 2; // priming tokens
+
+    // Handle the last message separately (to allow truncation if needed)
+    const lastMessage = { ...messages[messages.length - 1] };
+    let lastMsgTokens = 4;
+    if (typeof lastMessage.content === "string") {
+      lastMsgTokens += encoder.encode(lastMessage.content).length;
+      if (lastMsgTokens > maxTokens) {
+        lastMessage.content = this.truncateTextToFitTokens(
+          lastMessage.content,
+          maxTokens - 4,
+          encoder
+        );
+        lastMsgTokens = 4 + encoder.encode(lastMessage.content).length;
+      }
+    } else if (Array.isArray(lastMessage.content)) {
+      // You can add similar truncation if you expect array content here
+    }
+
+    trimmedMessages.push(lastMessage);
+    totalTokens += lastMsgTokens;
+
+    // Add earlier messages until token limit reached
+    for (let i = messages.length - 2; i >= 0; i--) {
+      const msg = messages[i];
+      let tokenCount = 4;
+      if (typeof msg.content === "string") {
+        tokenCount += encoder.encode(msg.content).length;
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if ("text" in part && typeof part.text === "string") {
+            tokenCount += encoder.encode(part.text).length;
+          }
+        }
+      }
+
+      if (totalTokens + tokenCount > maxTokens) break;
+
+      trimmedMessages.push(msg);
+      totalTokens += tokenCount;
+    }
+
+    encoder.free();
+    return trimmedMessages.reverse();
+  }
+
   /**
-   * Creates a chat completion given an array of messages.
-   * Returns the first message from the choices.
+   * Main method to create chat completion with trimming and validation.
    */
   public static async createChatCompletion(
     messages: ChatCompletionMessageParam[]
-  ): Promise<ChatCompletionMessage> {
-    const response = await this.client.chat.completions.create({
-      model: "gpt-3.5-turbo",
+  ): Promise<ChatCompletionMessage & { refusal: null }> {
+    const maxInputTokens = this.MAX_TOKENS - this.RESPONSE_TOKENS;
+
+    const trimmedMessages = this.trimMessagesToFitTokenLimit(
       messages,
+      maxInputTokens,
+      this.MODEL_TYPED
+    );
+
+    if (!trimmedMessages || trimmedMessages.length === 0) {
+      throw new Error("No valid messages after trimming for token limit.");
+    }
+
+    const response = await this.client.chat.completions.create({
+      model: this.MODEL,
+      messages: trimmedMessages,
       temperature: 0.7,
-      max_tokens: 300,
+      max_tokens: this.RESPONSE_TOKENS,
     });
 
     if (!response.choices || response.choices.length === 0) {
       throw new Error("No choices returned from OpenAI");
     }
 
-    return response.choices[0].message;
+    // Add refusal:null to satisfy your type requirements
+    return {
+      ...response.choices[0].message,
+      refusal: null,
+    };
   }
 
-  /**
-   * Sends a simple user prompt and returns the assistant's textual response.
-   * Handles both string and array content from OpenAI.
-   */
   public static async getOpenAiResponse(prompt: string): Promise<string> {
     try {
       const response = await this.client.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: this.MODEL,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
-        max_tokens: 1000,
+        max_tokens: this.RESPONSE_TOKENS,
       });
 
-      const content = response.choices[0].message?.content;
+      const content = response.choices[0]?.message?.content;
 
-      if (!content) {
-        return "No response from assistant.";
-      }
-
-      if (typeof content === "string") {
-        return content;
-      }
+      if (typeof content === "string") return content;
 
       if (Array.isArray(content)) {
         const parts = content as ChatCompletionContentPart[];
 
-        const textParts = parts
+        return parts
           .filter(
             (part): part is ChatCompletionContentPartText =>
-              typeof (part as ChatCompletionContentPartText).text === "string"
+              "text" in part && typeof part.text === "string"
           )
-          .map((part) => part.text ?? "");
-
-        return textParts.join("");
+          .map((part) => part.text ?? "")
+          .join("");
       }
 
       return "No response from assistant.";
@@ -85,9 +187,6 @@ export class OpenAIService {
     }
   }
 
-  /**
-   * Generates 2 suggested follow-up questions based on user and assistant messages.
-   */
   public static async generateFollowUpSuggestions(
     userMessage: string,
     assistantMessage: string
@@ -103,24 +202,27 @@ Suggest 2 natural follow-up questions the user might ask next:
 
     try {
       const completion = await this.client.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: this.MODEL,
         messages: [
-          { role: "system", content: "You are a helpful assistant that suggests follow-up questions after each answer." },
-          { role: "user", content: prompt }
+          {
+            role: "system",
+            content:
+              "You are a helpful assistant that suggests follow-up questions after each answer.",
+          },
+          { role: "user", content: prompt },
         ],
         temperature: 0.7,
         max_tokens: 500,
       });
 
-      const content = completion.choices[0].message?.content || "";
+      const content = completion.choices[0].message?.content ?? "";
 
-      // Extract two questions using RegExp
       const match = content.match(/1\.\s*(.+?)\s*2\.\s*(.+)/s);
       if (match && match.length >= 3) {
         return [match[1].trim(), match[2].trim()];
       }
 
-      return ["Can you elaborate?", "What else should I know about this?"]; // fallback
+      return ["Can you elaborate?", "What else should I know about this?"];
     } catch (error: any) {
       console.error("Suggestion generation error:", {
         message: error.message,
@@ -128,7 +230,7 @@ Suggest 2 natural follow-up questions the user might ask next:
         stack: error.stack,
       });
 
-      return ["Can you elaborate?", "What else should I know about this?"]; // fallback
+      return ["Can you elaborate?", "What else should I know about this?"];
     }
   }
 }
