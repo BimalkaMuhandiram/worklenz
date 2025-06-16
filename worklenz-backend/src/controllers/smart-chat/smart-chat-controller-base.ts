@@ -136,10 +136,10 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
   }
 
-  protected static async createChatWithQueryData(dataList: any, messages: any[]) {
-    messages.unshift(PromptBuilder.buildResponsePrompt(dataList));
-    return OpenAIService.createChatCompletion(messages);
-  }
+  protected static async createChatWithQueryData(dataList: any, messages: any[], teamId: string) {
+  messages.unshift(PromptBuilder.buildResponsePrompt({ items: dataList.data, teamId }));
+  return OpenAIService.createChatCompletion(messages);
+}
 
   // 🆕 Generate SQL query from user message
   protected static async getSQLQueryFromMessage({

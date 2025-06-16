@@ -125,15 +125,21 @@ Return:
     };
   }
 
-  static buildResponsePrompt(dataList: string): ChatCompletionMessageParam {
-    return {
-      role: "system",
-      content: `
+  static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
+  const { items, teamId } = data;
+
+  const filteredItems = Array.isArray(items)
+    ? items.filter(item => String(item.team_id) === String(teamId))
+    : [];
+
+  return {
+    role: "system",
+    content: `
 You are a project assistant. Use the provided data to answer the user's question.
 
 ## Data
 \`\`\`json
-${dataList}
+${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
 \`\`\`
 
 ## Instructions
@@ -144,9 +150,10 @@ ${dataList}
 - Use \`backticks\` for names and dates.
 
 Say "No data found" if the list is empty.
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
+
 
   static buildFewShotPrompt(
     data: any,
@@ -279,6 +286,7 @@ ${JSON.stringify(data.queryResult, null, 2)}
 - Otherwise, summarize clearly in markdown.
 - Use bullet points or tables where appropriate.
 - Highlight key findings and offer to help with follow-up.
+- If any field has no data (null, empty string, empty array), omit it from the summary entirely instead of mentioning missing details.
       `.trim(),
     };
   }
