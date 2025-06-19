@@ -301,9 +301,18 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
   };
 
   const retrySend = async (msg: IChatMessageWithStatus) => {
-    setChatMessages((prev) => prev.filter((m) => m.timestamp !== msg.timestamp));
-    await handleSend(msg.content, true);
-  };
+  
+  setChatMessages((prev) =>
+    prev.map((m) =>
+      m.timestamp === msg.timestamp
+        ? { ...m, status: 'pending' }
+        : m
+    )
+  );
+
+  // Send the same content again
+  await handleSend(msg.content, true);
+};
 
   const containerStyle = css`
     background-color: var(--background-color);
