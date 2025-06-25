@@ -29,6 +29,8 @@ app.set("port", port);
 const server = http.createServer(app);
 
 const io = new Server(server, {
+  pingInterval: 25000, // How often to ping clients
+  pingTimeout: 60000,  // How long to wait before closing idle client
   transports: ["websocket"],
   path: "/socket",
   cors: {
