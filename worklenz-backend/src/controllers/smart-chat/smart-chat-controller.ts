@@ -4,7 +4,6 @@ import db from "../../config/db";
 import { ServerResponse } from "../../models/server-response";
 import HandleExceptions from "../../decorators/handle-exceptions";
 import SmartChatControllerBase from "./smart-chat-controller-base";
-import { PromptBuilder } from "./prompt-builder";
 import { ChatLogCreateSchema, ChatInfoRequestSchema } from "./chat.schema";
 import { OpenAIService } from "./openai-service";
 
@@ -21,17 +20,19 @@ export default class SmartchatController extends SmartChatControllerBase {
 
     const { messages } = validation.data;
 
-    const q = `
+    const query = `
       INSERT INTO chat_log (team_id, user_id, messages, created_at)
       VALUES ($1, $2, $3, NOW())
       RETURNING *;
     `;
-    const result = await db.query(q, [teamId, userId, JSON.stringify(messages)]);
+
+    const result = await db.query(query, [teamId, userId, JSON.stringify(messages)]);
     const [data] = result.rows;
 
     return res.status(200).send(new ServerResponse(true, data));
   }
 
+  // Handle interpreting a user question, generating SQL, executing it, and responding intelligently
   @HandleExceptions()
   public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): Promise<IWorkLenzResponse> {
     try {
@@ -48,14 +49,14 @@ export default class SmartchatController extends SmartChatControllerBase {
       }
 
       const { chat: messages } = validation.data;
-      const userMessage = messages[messages.length - 1]?.content || "";
+      const userMessage = messages[messages.length - 1]?.content ?? "";
 
       const schema = this.getTableSchema();
       if (!schema) {
         return res.status(400).send(new ServerResponse(false, "Schema not found."));
       }
 
-      // === STEP 1: Generate SQL Query ===
+      // STEP 1- Generate SQL Query
       const queryResponseObj = await SmartChatControllerBase.getSQLQueryFromMessage({
         userMessage,
         userId,
@@ -67,10 +68,38 @@ export default class SmartchatController extends SmartChatControllerBase {
         return res.status(400).send(new ServerResponse(false, "No valid SQL query generated."));
       }
 
-      const sqlQuery = queryResponseObj.query.trim();
+      let sqlQuery = queryResponseObj.query.trim();
       console.log("Generated SQL Query:", sqlQuery);
 
-      // === STEP 2: Execute the SQL Query ===
+      // STEP 2- Inject team_id filter if missing 
+      // Check for team_id filter case-insensitive in WHERE clause
+      const lowerQuery = sqlQuery.toLowerCase();
+      if (!/where\s+.*team_id\s*=/.test(lowerQuery)) {
+        // Insert team_id filter just after FROM clause or after existing WHERE if any
+        if (/select\s+/.test(lowerQuery) && /from\s+/.test(lowerQuery)) {
+          // Determine if query already has a WHERE clause
+          if (/where\s+/i.test(lowerQuery)) {
+            // Append team_id condition with AND
+            sqlQuery = sqlQuery.replace(/where\s+/i, (match: string) => `${match} team_id = '${teamId}' AND `);
+          }
+          else {
+            // Insert WHERE clause after FROM <table>
+            const fromMatch = /from\s+[\w.]+/i.exec(sqlQuery);
+            if (fromMatch) {
+              const insertPos = fromMatch.index + fromMatch[0].length;
+              sqlQuery = sqlQuery.slice(0, insertPos) + ` WHERE team_id = '${teamId}'` + sqlQuery.slice(insertPos);
+            } else {
+              // fallback- append WHERE at end
+              sqlQuery += ` WHERE team_id = '${teamId}'`;
+            }
+          }
+          console.log("Modified SQL Query with team_id filter:", sqlQuery);
+        } else {
+          console.warn("SQL does not look like a standard SELECT...FROM query. Skipping filter injection.");
+        }
+      }
+
+      // STEP 3- Execute the SQL Query 
       let dbResult;
       try {
         const queryResult = await db.query(sqlQuery);
@@ -84,7 +113,7 @@ export default class SmartchatController extends SmartChatControllerBase {
         return res.status(500).send(new ServerResponse(false, "Query execution failed."));
       }
 
-      // === STEP 3: Generate Final Natural Language Answer ===
+      // STEP 4- Generate Final Natural Language Answer 
       const answer = await SmartChatControllerBase.getAnswerFromQueryResult({
         userMessage,
         result: dbResult,
@@ -92,22 +121,18 @@ export default class SmartchatController extends SmartChatControllerBase {
 
       console.log("AI Answer:", answer);
 
-      // === STEP 4: Generate Follow-up Suggestions ===
-      const assistantContent = answer.content ?? ""; // fallback empty string if null
+      // STEP 5- Generate Follow-up Suggestions
+      const assistantContent = answer.content ?? "";
 
-      const suggestions = await OpenAIService.generateFollowUpSuggestions(
-        userMessage,
-        assistantContent
-      );
+      const suggestions = await OpenAIService.generateFollowUpSuggestions(userMessage, assistantContent);
 
-      // === STEP 5: Return Full Response ===
+      // STEP 6- Return Full Response
       return res.status(200).send(
         new ServerResponse(true, {
           answer: answer.content,
           suggestions,
-      })
+        })
       );
-
     } catch (err) {
       console.error("getChatInfo error:", err);
       return res.status(500).send(new ServerResponse(false, "Unexpected error."));

@@ -1,4 +1,6 @@
-import { z } from "zod";
+// Data validation schemas
+
+import { z } from "zod"; // Provides tools to define and validate schemas
 
 // Define a reusable message schema
 const ChatMessageSchema = z.object({

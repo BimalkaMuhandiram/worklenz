@@ -1,4 +1,3 @@
-// src/chat/chat.dto.ts
 import { z } from "zod";
 
 export const ChatRequestSchema = z.object({

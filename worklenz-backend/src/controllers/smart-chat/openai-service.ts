@@ -1,17 +1,17 @@
-import OpenAI from "openai";
+import OpenAI from "openai"; // OpenAI SDK client
 import {
   ChatCompletionMessageParam,
   ChatCompletionMessage,
   ChatCompletionContentPart,
   ChatCompletionContentPartText,
-} from "openai/resources";
-import { encoding_for_model, TiktokenModel } from "tiktoken";
+} from "openai/resources/chat/completions"; // Chat types
+import { encoding_for_model, TiktokenModel } from "tiktoken"; // For counting tokens accurately
 
 export class OpenAIService {
-  private static readonly MODEL = "gpt-4-turbo";
-  private static readonly MODEL_TYPED = "gpt-4-turbo" as TiktokenModel;
-  private static readonly MAX_TOKENS = 4096;
-  private static readonly RESPONSE_TOKENS = 1000;
+  private static readonly MODEL = "gpt-4-turbo"; // Model used
+  private static readonly MODEL_TYPED = "gpt-4-turbo" as TiktokenModel; // For token encoder
+  private static readonly MAX_TOKENS = 4096; // Max tokens allowed per request
+  private static readonly RESPONSE_TOKENS = 1000; // Reserved for OpenAI's response
 
   private static client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY!,
@@ -47,18 +47,19 @@ export class OpenAIService {
   }
 
   private static truncateTextToFitTokens(
-    text: string,
-    maxTokens: number,
-    encoder: ReturnType<typeof encoding_for_model>
-  ): string {
-    const encoded = encoder.encode(text);
-    if (encoded.length <= maxTokens) return text;
+  text: string,
+  maxTokens: number,
+  encoder: ReturnType<typeof encoding_for_model>
+): string {
+  const encoded = encoder.encode(text);
+  if (encoded.length <= maxTokens) return text;
 
-    // Simple heuristic to avoid cutting mid-word:
-    // Find approximate cutoff position in characters by assuming ~4 chars per token.
-    const approxCutoff = maxTokens * 4;
-    return text.slice(0, approxCutoff);
-  }
+  // Truncate tokens directly
+  const truncatedEncoded = encoded.slice(0, maxTokens);
+  // Decode back to string safely
+  const decoder = new TextDecoder();
+  return decoder.decode(new Uint8Array(truncatedEncoded));
+}
 
   private static trimMessagesToFitTokenLimit(
     messages: ChatCompletionMessageParam[],
@@ -83,7 +84,7 @@ export class OpenAIService {
         lastMsgTokens = 4 + encoder.encode(lastMessage.content).length;
       }
     } else if (Array.isArray(lastMessage.content)) {
-      // You can add similar truncation if you expect array content here
+      
     }
 
     trimmedMessages.push(lastMessage);
@@ -113,9 +114,8 @@ export class OpenAIService {
     return trimmedMessages.reverse();
   }
 
-  /**
-   * Main method to create chat completion with trimming and validation.
-   */
+  // Main method to create chat completion with trimming and validation
+
   public static async createChatCompletion(
     messages: ChatCompletionMessageParam[]
   ): Promise<ChatCompletionMessage & { refusal: null }> {

@@ -1,6 +1,5 @@
-import { ChatCompletionMessageParam } from "openai/resources";
+import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-// Defines allowed prompt types used by the app
 type PromptType =
   | "system"
   | "query"
@@ -13,8 +12,8 @@ type PromptType =
 
 interface PromptInput {
   type: PromptType;
-  data: any; // input data needed to build the prompt
-  examples?: { user: string; assistant: string }[]; // for few-shot learning
+  data: any;
+  examples?: ReadonlyArray<{ user: string; assistant: string }>;
 }
 
 export class PromptBuilder {
@@ -27,7 +26,7 @@ export class PromptBuilder {
       case "response":
         return this.buildResponsePrompt(input.data);
       case "few-shot":
-        return this.buildFewShotPrompt(input.data, input.examples || []);
+        return this.buildFewShotPrompt(input.data, input.examples ?? []);
       case "cot":
         return this.buildChainOfThoughtPrompt(input.data);
       case "hybrid":
@@ -41,6 +40,7 @@ export class PromptBuilder {
     }
   }
 
+  // Set up assistant behavior and tone
   static buildSystemPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
@@ -68,6 +68,7 @@ Respond clearly and use a helpful, confident tone.
     };
   }
 
+  // Handle unclear or multi-intent queries
   static buildHybridPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
@@ -76,7 +77,7 @@ You are an intelligent assistant for Worklenz. Analyze the user's input and dete
 
 ## Context
 \`\`\`json
-${JSON.stringify(data.context || {}, null, 2)}
+${JSON.stringify(data.context ?? {}, null, 2)}
 \`\`\`
 
 ## Instructions
@@ -97,23 +98,27 @@ Reply in markdown. Keep responses concise, with clear action suggestions.
     };
   }
 
-  static buildQueryPrompt(schema: string, teamId: string): ChatCompletionMessageParam {
+  // Convert natural language into SQL
+  static buildQueryPrompt(schema: any, teamId: string): ChatCompletionMessageParam {
     return {
       role: "system",
       content: `
 You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema.
 
 ## Schema
-\`\`\`
-${schema}
+\`\`\`json
+${JSON.stringify(schema, null, 2)}
 \`\`\`
 
-- Only generate SELECT queries.
-- Ensure the WHERE clause includes: \`in_organization(team_id, '${teamId}')\`
-- LIMIT results to 100.
+## Notes:
+- Filter all results by team_id = '${teamId}'.
+- Some tables (e.g., tasks) may not have team_id directly.
+- For such tables, join related tables (e.g., projects) to filter by team.
+- Use valid table and column names only.
+- Limit results to 100 rows.
 - Skip internal or irrelevant fields like id, color.
 
-Return:
+Return JSON with:
 \`\`\`json
 {
   "summary": "...",
@@ -125,16 +130,17 @@ Return:
     };
   }
 
+  // Convert SQL result to human response
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
-  const { items, teamId } = data;
+    const { items, teamId } = data;
 
-  const filteredItems = Array.isArray(items)
-    ? items.filter(item => String(item.team_id) === String(teamId))
-    : [];
+    const filteredItems = Array.isArray(items)
+      ? items.filter(item => String(item.team_id) === String(teamId))
+      : [];
 
-  return {
-    role: "system",
-    content: `
+    return {
+      role: "system",
+      content: `
 You are a project assistant. Use the provided data to answer the user's question.
 
 ## Data
@@ -150,143 +156,130 @@ ${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
 - Use \`backticks\` for names and dates.
 
 Say "No data found" if the list is empty.
-    `.trim(),
-  };
-}
+      `.trim(),
+    };
+  }
 
-
+  // Demonstrate examples for better query generation
   static buildFewShotPrompt(
     data: any,
-    examples: { user: string; assistant: string }[]
+    examples: ReadonlyArray<{ user: string; assistant: string }>
   ): ChatCompletionMessageParam {
-    // If no examples provided, add default few-shot examples
     if (examples.length === 0) {
       examples = [
         {
           user: "Show me all tasks assigned to John in project Alpha.",
           assistant: `{
   "summary": "Tasks assigned to John in project Alpha",
-  "query": "SELECT * FROM tasks WHERE assignee = 'John' AND project_name = 'Alpha' AND team_id = '...' LIMIT 100",
+  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.assignee = 'John' AND p.name = 'Alpha' AND p.team_id = '...' LIMIT 100",
   "is_query": true
-}`
+}`,
         },
         {
           user: "List overdue tasks.",
           assistant: `{
   "summary": "Overdue tasks",
-  "query": "SELECT * FROM tasks WHERE due_date < CURRENT_DATE AND status != 'completed' AND team_id = '...' LIMIT 100",
+  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.due_date < CURRENT_DATE AND p.team_id = '...' LIMIT 100",
   "is_query": true
-}`
+}`,
         },
       ];
     }
 
-    const formattedExamples = examples
-      .map((e) => `User: ${e.user}\nAssistant: ${e.assistant}`)
+    const fewShotText = examples
+      .map(
+        (ex) =>
+          `User: ${ex.user}
+Assistant: \`\`\`json
+${ex.assistant}
+\`\`\``
+      )
       .join("\n\n");
 
     return {
       role: "system",
       content: `
-You are a helpful project management assistant. Follow the pattern of the examples below.
+You will receive a user query. Translate it into a SQL SELECT query filtered by team_id.
 
 ## Examples
-${formattedExamples}
+${fewShotText}
 
-## Current Message
-User: ${data.query}
+Now convert the following user query:
+"${data.userMessage}"
       `.trim(),
     };
   }
 
+  // Break down reasoning steps
   static buildChainOfThoughtPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
       content: `
-Let's reason through the following task.
+You are a reasoning assistant. Break down the user's query into logical steps.
 
-## Context
-\`\`\`json
-${JSON.stringify(data, null, 2)}
-\`\`\`
+User message: "${data.userMessage}"
 
-1. Understand the user request.
-2. Identify the intent (question, update, assign, etc.).
-3. Look for missing or ambiguous information.
-4. Respond in clear steps and suggest next actions.
+Explain how you would answer this with SQL or data lookups.
       `.trim(),
     };
   }
 
+  // 	Create SQL with schema and user context
   static buildSQLQueryPrompt(data: {
-  userMessage: string;
-  schema: any;
-  userId: string;
-  teamId: string;
-}): ChatCompletionMessageParam {
-  return {
-    role: "system",
-    content: `
-You are a PostgreSQL SQL assistant. Generate a SELECT query based on the schema and user message.
-
-## Schema
+    userMessage: string;
+    userId: string;
+    teamId: string;
+    schema: any;
+  }): ChatCompletionMessageParam {
+    return {
+      role: "user",
+      content: `
+## Database Schema
 \`\`\`json
 ${JSON.stringify(data.schema, null, 2)}
 \`\`\`
 
-## User Message
+## Team ID: '${data.teamId}'
+
+## Important notes:
+- The "tasks" table does NOT have a "team_id" column.
+- To filter tasks by team, join tasks.project_id = projects.id and filter projects.team_id = '${data.teamId}'.
+- Always restrict data access to team_id = '${data.teamId}' (directly or via join).
+- Use only tables and columns from the schema.
+- Limit results to 100 rows.
+
+## User query:
 "${data.userMessage}"
 
-## Guidelines
-- Only generate SELECT queries.
-- Use only valid table aliases. Never reference aliases that are not explicitly defined in the FROM or JOIN clauses.
-- Do not make up table or column names — strictly use what's in the schema.
-- For UUID columns like project_id, team_id, user_id:
-  - If filtering by name, use subqueries to resolve UUIDs, e.g.:
-    \`project_id = (SELECT id FROM projects WHERE name = 'Project Name')\`
-- Ensure JOINs have valid relationships as per the schema.
-- Limit results to 100 rows.
-- Never generate DROP/INSERT/UPDATE/DELETE queries.
-
-## Output Format
-Respond with JSON:
-\`\`\`json
+## Output format (JSON):
 {
-  "intent": "...",
-  "query": "SELECT ..."
+  "summary": "Short description of query",
+  "query": "SQL SELECT query string",
+  "is_query": true
 }
-\`\`\`
+      `.trim(),
+    };
+  }
 
-Make sure the SQL is syntactically valid and safe to run. Use proper table aliases and JOIN logic.
-    `.trim(),
-  };
-}
-
-
+  // 	Turn query output into human insight
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
     queryResult: any[];
   }): ChatCompletionMessageParam {
     return {
-      role: "system",
+      role: "user",
       content: `
-You are a helpful assistant. Convert the SQL query result into a human-readable summary.
-
-## User Question
+Given the user message:
 "${data.userMessage}"
 
-## Query Result
+And the following query result data (JSON):
 \`\`\`json
 ${JSON.stringify(data.queryResult, null, 2)}
 \`\`\`
 
-## Instructions
-- If the result is empty, say: "No data found."
-- If the query was invalid or failed, say: "Sorry, I couldn't retrieve data. Please check your request."
-- Otherwise, summarize clearly in markdown.
-- Use bullet points or tables where appropriate.
-- Highlight key findings and offer to help with follow-up.
-- If any field has no data (null, empty string, empty array), omit it from the summary entirely instead of mentioning missing details.
+Summarize the data clearly and helpfully. Mention any important highlights like overdue tasks or approaching deadlines. Suggest possible next actions.
+
+Respond in markdown using backticks \` for names and dates.
       `.trim(),
     };
   }

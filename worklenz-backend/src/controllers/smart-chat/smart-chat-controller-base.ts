@@ -22,7 +22,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return result.rows;
   }
 
-  protected static async createTableSchema() {
+  protected static async createTableSchema(): Promise<string> {
     const tables = (process.env.TABLES || "")
       .split(",")
       .map((t) => t.trim())
@@ -77,12 +77,12 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
           ON c.table_schema = fk_info.fk_schema AND c.table_name = fk_info.fk_table AND c.column_name = fk_info.fk_column
         LEFT JOIN pk_info 
           ON c.table_schema = pk_info.table_schema AND c.table_name = pk_info.table_name AND c.column_name = pk_info.column_name
-        WHERE c.table_name = '${table}'
+        WHERE c.table_name = $1
         GROUP BY c.table_name;
       `;
 
       try {
-        const result = await db.query(query);
+        const result = await db.query(query, [table]);
         if (result.rows.length) {
           schema += result.rows.map((row) => row.table_schema_representation).join("\n") + "\n";
         }
@@ -94,11 +94,11 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return schema;
   }
 
-  protected static getTableSchema() {
+  protected static getTableSchema(): string {
     return process.env.SCHEMA || "";
   }
 
-  protected static async getQueryData(schema: string, teamId: string, messages: any[]) {
+  protected static async getQueryData(schema: string, teamId: string, messages: any[]): Promise<string | { summary: string; data: any[] }> {
     messages.unshift(PromptBuilder.buildQueryPrompt(schema, teamId));
     const aiResponse = await OpenAIService.createChatCompletion(messages);
 
@@ -137,11 +137,10 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
   }
 
   protected static async createChatWithQueryData(dataList: any, messages: any[], teamId: string) {
-  messages.unshift(PromptBuilder.buildResponsePrompt({ items: dataList.data, teamId }));
-  return OpenAIService.createChatCompletion(messages);
-}
+    messages.unshift(PromptBuilder.buildResponsePrompt({ items: dataList.data, teamId }));
+    return OpenAIService.createChatCompletion(messages);
+  }
 
-  // 🆕 Generate SQL query from user message
   protected static async getSQLQueryFromMessage({
     userMessage,
     userId,
@@ -151,8 +150,9 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     userMessage: string;
     userId: string;
     teamId: string;
-    schema: any;
+    schema: string;
   }) {
+    // Build a prompt to ask AI for a SQL query
     const prompt = PromptBuilder.buildSQLQueryPrompt({
       userMessage,
       userId,
@@ -160,9 +160,17 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       schema,
     });
 
-    const res = await OpenAIService.createChatCompletion([prompt]);
+    // System instruction enforcing team data isolation
+    const systemInstruction = {
+      role: "system" as const,
+      content: `You must only generate SQL queries that restrict results to team_id = '${teamId}'. Never expose data from other teams. Always include a WHERE clause or equivalent.`,
+    };
+
+    // Call OpenAI chat API with system instructions and prompt
+    const res = await OpenAIService.createChatCompletion([systemInstruction, prompt]);
 
     try {
+      // Extract JSON from AI response
       const content = res?.content?.replace(/```json|```/g, "").trim() || "{}";
       return JSON.parse(content);
     } catch (err) {
@@ -171,7 +179,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
   }
 
-  // 🆕 Convert SQL result to human-friendly message
+  // Convert SQL result to human-friendly message
   protected static async getAnswerFromQueryResult({
     userMessage,
     result,
