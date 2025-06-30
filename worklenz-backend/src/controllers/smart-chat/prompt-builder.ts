@@ -151,7 +151,6 @@ ${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
 ## Instructions
 - Summarize the results clearly.
 - Highlight overdue or high-priority items.
-- Suggest helpful next actions (e.g., update a deadline).
 - Limit output to the top 10 results.
 - Use \`backticks\` for names and dates.
 
@@ -277,7 +276,7 @@ And the following query result data (JSON):
 ${JSON.stringify(data.queryResult, null, 2)}
 \`\`\`
 
-Summarize the data clearly and helpfully. Mention any important highlights like overdue tasks or approaching deadlines. Suggest possible next actions.
+Summarize the data clearly and helpfully. 
 
 Respond in markdown using backticks \` for names and dates.
       `.trim(),

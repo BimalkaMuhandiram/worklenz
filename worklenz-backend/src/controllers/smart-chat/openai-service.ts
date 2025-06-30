@@ -8,8 +8,8 @@ import {
 import { encoding_for_model, TiktokenModel } from "tiktoken"; // For counting tokens accurately
 
 export class OpenAIService {
-  private static readonly MODEL = "gpt-4-turbo"; // Model used
-  private static readonly MODEL_TYPED = "gpt-4-turbo" as TiktokenModel; // For token encoder
+  private static readonly MODEL = "gpt-3.5-turbo"; // Model used
+  private static readonly MODEL_TYPED = "gpt-3.5-turbo" as TiktokenModel; // For token encoder
   private static readonly MAX_TOKENS = 4096; // Max tokens allowed per request
   private static readonly RESPONSE_TOKENS = 1000; // Reserved for OpenAI's response
 
