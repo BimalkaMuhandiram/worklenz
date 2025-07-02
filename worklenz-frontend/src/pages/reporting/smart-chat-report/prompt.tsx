@@ -20,12 +20,7 @@ export const firstScreenPrompts: PromptsProps['items'] = [
       children: [
         {
         key: '2',
-        description: 'I want to list down all Projects',
-        icon: <ReadOutlined style={{ color: '#1890FF' }} />,
-        },
-        {
-        key: '1',
-        description: 'I want to summarization of projects',
+        description: 'I want to list down all Projects with names',
         icon: <FireOutlined style={{ color: '#FF4D4F' }} />,
         }
       ]

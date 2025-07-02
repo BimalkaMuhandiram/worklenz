@@ -4,6 +4,7 @@ import {
   ChatCompletionMessage,
   ChatCompletionContentPart,
   ChatCompletionContentPartText,
+  ChatCompletionContentPartRefusal,
 } from "openai/resources/chat/completions"; // Chat types
 import { encoding_for_model, TiktokenModel } from "tiktoken"; // For counting tokens accurately
 
@@ -34,7 +35,7 @@ export class OpenAIService {
         tokens += encoder.encode(msg.content).length;
       } else if (Array.isArray(msg.content)) {
         for (const part of msg.content) {
-          if ("text" in part && typeof part.text === "string") {
+          if (isTextPart(part)) {
             tokens += encoder.encode(part.text).length;
           }
         }
@@ -47,19 +48,19 @@ export class OpenAIService {
   }
 
   private static truncateTextToFitTokens(
-  text: string,
-  maxTokens: number,
-  encoder: ReturnType<typeof encoding_for_model>
-): string {
-  const encoded = encoder.encode(text);
-  if (encoded.length <= maxTokens) return text;
+    text: string,
+    maxTokens: number,
+    encoder: ReturnType<typeof encoding_for_model>
+  ): string {
+    const encoded = encoder.encode(text);
+    if (encoded.length <= maxTokens) return text;
 
-  // Truncate tokens directly
-  const truncatedEncoded = encoded.slice(0, maxTokens);
-  // Decode back to string safely
-  const decoder = new TextDecoder();
-  return decoder.decode(new Uint8Array(truncatedEncoded));
-}
+    // Truncate tokens directly
+    const truncatedEncoded = encoded.slice(0, maxTokens);
+    // Decode back to string safely
+    const decoder = new TextDecoder();
+    return decoder.decode(new Uint8Array(truncatedEncoded));
+  }
 
   private static trimMessagesToFitTokenLimit(
     messages: ChatCompletionMessageParam[],
@@ -73,6 +74,7 @@ export class OpenAIService {
     // Handle the last message separately (to allow truncation if needed)
     const lastMessage = { ...messages[messages.length - 1] };
     let lastMsgTokens = 4;
+
     if (typeof lastMessage.content === "string") {
       lastMsgTokens += encoder.encode(lastMessage.content).length;
       if (lastMsgTokens > maxTokens) {
@@ -84,7 +86,11 @@ export class OpenAIService {
         lastMsgTokens = 4 + encoder.encode(lastMessage.content).length;
       }
     } else if (Array.isArray(lastMessage.content)) {
-      
+      for (const part of lastMessage.content) {
+        if (isTextPart(part)) {
+          lastMsgTokens += encoder.encode(part.text).length;
+        }
+      }
     }
 
     trimmedMessages.push(lastMessage);
@@ -98,7 +104,7 @@ export class OpenAIService {
         tokenCount += encoder.encode(msg.content).length;
       } else if (Array.isArray(msg.content)) {
         for (const part of msg.content) {
-          if ("text" in part && typeof part.text === "string") {
+          if (isTextPart(part)) {
             tokenCount += encoder.encode(part.text).length;
           }
         }
@@ -113,9 +119,7 @@ export class OpenAIService {
     encoder.free();
     return trimmedMessages.reverse();
   }
-
   // Main method to create chat completion with trimming and validation
-
   public static async createChatCompletion(
     messages: ChatCompletionMessageParam[]
   ): Promise<ChatCompletionMessage & { refusal: null }> {
@@ -160,19 +164,22 @@ export class OpenAIService {
 
       const content = response.choices[0]?.message?.content;
 
-      if (typeof content === "string") return content;
+      if (typeof content === "string") {
+        return content;
+      }
 
       if (Array.isArray(content)) {
-        const parts = content as ChatCompletionContentPart[];
-
-        return parts
-          .filter(
-            (part): part is ChatCompletionContentPartText =>
-              "text" in part && typeof part.text === "string"
-          )
-          .map((part) => part.text ?? "")
-          .join("");
+  const textParts = (content as (ChatCompletionContentPart | ChatCompletionContentPartRefusal)[])
+    .map((part) => {
+      if (isTextPart(part)) {
+        return part.text;
       }
+      return null;
+    })
+    .filter((text): text is string => text !== null);
+
+  return textParts.join("");
+}
 
       return "No response from assistant.";
     } catch (error: any) {
@@ -217,7 +224,7 @@ Suggest 2 natural follow-up questions the user might ask next:
 
       const content = completion.choices[0].message?.content ?? "";
 
-      const match = content.match(/1\.\s*(.+?)\s*2\.\s*(.+)/s);
+      const match: RegExpMatchArray | null = content.match(/1\.\s*(.+?)\s*2\.\s*(.+)/s);
       if (match && match.length >= 3) {
         return [match[1].trim(), match[2].trim()];
       }
@@ -233,4 +240,21 @@ Suggest 2 natural follow-up questions the user might ask next:
       return ["Can you elaborate?", "What else should I know about this?"];
     }
   }
+
+public static async getEmbedding(text: string): Promise<number[]> {
+  const response = await this.client.embeddings.create({
+    model: "text-embedding-3-small", 
+    input: text,
+  });
+
+  return response.data[0].embedding;
+}
+
+}
+
+// Type guard
+function isTextPart(
+  part: ChatCompletionContentPart | ChatCompletionContentPartRefusal
+): part is ChatCompletionContentPartText {
+  return "text" in part && typeof part.text === "string";
 }

@@ -2,6 +2,7 @@ import db from "../../config/db";
 import ReportingControllerBase from "../reporting/reporting-controller-base";
 import { OpenAIService } from "./openai-service";
 import { PromptBuilder } from "./prompt-builder";
+import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 export default class SmartChatControllerBase extends ReportingControllerBase {
   protected static getOpenAiClient() {
@@ -98,25 +99,26 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return process.env.SCHEMA || "";
   }
 
-  protected static async getQueryData(schema: string, teamId: string, messages: any[]): Promise<string | { summary: string; data: any[] }> {
+  protected static async getQueryData(
+    schema: string,
+    teamId: string,
+    messages: ChatCompletionMessageParam[]
+  ): Promise<string | { summary: string; data: any[] }> {
     messages.unshift(PromptBuilder.buildQueryPrompt(schema, teamId));
     const aiResponse = await OpenAIService.createChatCompletion(messages);
 
     const cleaned = aiResponse?.content?.replace(/```json|```/g, "").trim() || "{}";
 
-    let result;
+    let result: any;
     try {
       result = JSON.parse(cleaned);
     } catch {
-      return {
-        summary: "Failed to parse AI response.",
-        data: [],
-      };
+      return { summary: "Failed to parse AI response.", data: [] };
     }
 
-    if (!result?.is_query || !result?.query?.includes(teamId)) {
+    if (!result?.is_query || typeof result.query !== "string" || !result.query.includes(teamId)) {
       return {
-        summary: result.summary || "Invalid query.",
+        summary: result?.summary || "Invalid query.",
         data: [],
       };
     }
@@ -136,7 +138,11 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
   }
 
-  protected static async createChatWithQueryData(dataList: any, messages: any[], teamId: string) {
+  protected static async createChatWithQueryData(
+    dataList: { data: any[] },
+    messages: ChatCompletionMessageParam[],
+    teamId: string
+  ) {
     messages.unshift(PromptBuilder.buildResponsePrompt({ items: dataList.data, teamId }));
     return OpenAIService.createChatCompletion(messages);
   }
@@ -152,25 +158,16 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     teamId: string;
     schema: string;
   }) {
-    // Build a prompt to ask AI for a SQL query
-    const prompt = PromptBuilder.buildSQLQueryPrompt({
-      userMessage,
-      userId,
-      teamId,
-      schema,
-    });
+    const prompt = PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
 
-    // System instruction enforcing team data isolation
-    const systemInstruction = {
-      role: "system" as const,
-      content: `You must only generate SQL queries that restrict results to team_id = '${teamId}'. Never expose data from other teams. Always include a WHERE clause or equivalent.`,
+    const systemInstruction: ChatCompletionMessageParam = {
+      role: "system",
+      content: `You must only generate SQL queries that restrict results to team_id = '${teamId}'. Never expose data from other teams.`,
     };
 
-    // Call OpenAI chat API with system instructions and prompt
     const res = await OpenAIService.createChatCompletion([systemInstruction, prompt]);
 
     try {
-      // Extract JSON from AI response
       const content = res?.content?.replace(/```json|```/g, "").trim() || "{}";
       return JSON.parse(content);
     } catch (err) {
@@ -179,7 +176,6 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
   }
 
-  // Convert SQL result to human-friendly message
   protected static async getAnswerFromQueryResult({
     userMessage,
     result,

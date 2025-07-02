@@ -1,6 +1,6 @@
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
-type PromptType =
+export type PromptType =
   | "system"
   | "query"
   | "response"
@@ -10,7 +10,7 @@ type PromptType =
   | "sql-query"
   | "sql-result";
 
-interface PromptInput {
+export interface PromptInput {
   type: PromptType;
   data: any;
   examples?: ReadonlyArray<{ user: string; assistant: string }>;
@@ -133,7 +133,6 @@ Return JSON with:
   // Convert SQL result to human response
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
     const { items, teamId } = data;
-
     const filteredItems = Array.isArray(items)
       ? items.filter(item => String(item.team_id) === String(teamId))
       : [];
