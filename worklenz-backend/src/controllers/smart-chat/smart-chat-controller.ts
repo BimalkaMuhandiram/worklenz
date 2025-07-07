@@ -76,12 +76,12 @@ export default class SmartchatController extends SmartChatControllerBase {
     if (!/where\s+.*team_id\s*=/.test(lowerQuery)) {
       if (/select\s+/.test(lowerQuery) && /from\s+/.test(lowerQuery)) {
         if (/where\s+/i.test(lowerQuery)) {
-          sqlQuery = sqlQuery.replace(/where\s+/i, (match: string) => `${match} team_id = '${teamId}' AND `);
+          sqlQuery = sqlQuery.replace(/where\s+/i, (match: string) => `${match} p.team_id = '${teamId}' AND `);
         } else {
           const fromMatch = /from\s+[\w.]+/i.exec(sqlQuery);
           if (fromMatch) {
             const insertPos = fromMatch.index + fromMatch[0].length;
-            sqlQuery = sqlQuery.slice(0, insertPos) + ` WHERE team_id = '${teamId}'` + sqlQuery.slice(insertPos);
+            sqlQuery = sqlQuery.slice(0, insertPos) + ` WHERE p.team_id = '${teamId}'` + sqlQuery.slice(insertPos);
           } else {
             sqlQuery += ` WHERE team_id = '${teamId}'`;
           }

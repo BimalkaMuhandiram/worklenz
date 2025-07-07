@@ -241,15 +241,48 @@ Suggest 2 natural follow-up questions the user might ask next:
     }
   }
 
-public static async getEmbedding(text: string): Promise<number[]> {
-  const response = await this.client.embeddings.create({
-    model: "text-embedding-3-small", 
-    input: text,
-  });
+  // Upgrade embedding model & improve getEmbedding 
+  public static async getEmbedding(text: string): Promise<number[]> {
+    const response = await this.client.embeddings.create({
+      model: "text-embedding-3-large", 
+      input: text,
+    });
 
-  return response.data[0].embedding;
-}
+    return response.data[0].embedding;
+  }
 
+  // Add batch embedding method for efficiency 
+  public static async getBatchEmbeddings(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+
+    const response = await this.client.embeddings.create({
+      model: "text-embedding-3-large",
+      input: texts,
+    });
+
+    return response.data.map((item) => item.embedding);
+  }
+
+  // Add vector similarity helper function 
+  // Cosine similarity between two vectors
+  public static cosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (vecA.length !== vecB.length) {
+      throw new Error("Vectors must be the same length for cosine similarity.");
+    }
+    let dot = 0;
+    let magA = 0;
+    let magB = 0;
+
+    for (let i = 0; i < vecA.length; i++) {
+      dot += vecA[i] * vecB[i];
+      magA += vecA[i] * vecA[i];
+      magB += vecB[i] * vecB[i];
+    }
+    magA = Math.sqrt(magA);
+    magB = Math.sqrt(magB);
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (magA * magB);
+  }
 }
 
 // Type guard

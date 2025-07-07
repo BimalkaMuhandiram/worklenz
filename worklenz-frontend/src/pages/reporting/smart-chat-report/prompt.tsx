@@ -20,7 +20,7 @@ export const firstScreenPrompts: PromptsProps['items'] = [
       children: [
         {
         key: '2',
-        description: 'I want to list down all projects',
+        description: 'How many projects are currently in progress',
         icon: <FireOutlined style={{ color: '#FF4D4F' }} />,
         }
       ]

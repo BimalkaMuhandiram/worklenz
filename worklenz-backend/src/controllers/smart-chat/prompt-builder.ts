@@ -1,4 +1,5 @@
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { OpenAIService } from "./openai-service";
 
 export type PromptType =
   | "system"
@@ -17,12 +18,17 @@ export interface PromptInput {
 }
 
 export class PromptBuilder {
-  static build(input: PromptInput): ChatCompletionMessageParam {
+  static async build(input: PromptInput): Promise<ChatCompletionMessageParam> {
     switch (input.type) {
       case "system":
         return this.buildSystemPrompt(input.data);
       case "query":
-        return this.buildQueryPrompt(input.data.schema, input.data.teamId);
+        return await this.buildQueryPrompt(
+          input.data.schema,
+          input.data.teamId,
+          input.data.userMessage,
+          input.data.fullSchemaDescriptions
+        );
       case "response":
         return this.buildResponsePrompt(input.data);
       case "few-shot":
@@ -38,6 +44,33 @@ export class PromptBuilder {
       default:
         throw new Error(`Unsupported prompt type: ${input.type}`);
     }
+  }
+
+  // Enrich schema with closest relevant schema info using embeddings
+  private static async enrichSchemaWithRelevantInfo(
+    userMessage: string,
+    fullSchemaDescriptions: string[] // pre-embedded schema descriptions as strings
+  ): Promise<string> {
+    // 1. Embed user message
+    const userEmbedding = await OpenAIService.getEmbedding(userMessage);
+
+    // 2. Embed all schema description texts (batch)
+    // (Assuming you already have precomputed embeddings for these descriptions,
+    //  if not, call getBatchEmbeddings once on startup and cache results)
+    const schemaEmbeddings = await OpenAIService.getBatchEmbeddings(fullSchemaDescriptions);
+
+    // 3. Find top relevant schema descriptions by cosine similarity
+    const scored = schemaEmbeddings.map((emb, idx) => ({
+      score: OpenAIService.cosineSimilarity(userEmbedding, emb),
+      text: fullSchemaDescriptions[idx],
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+
+    // 4. Take top 3 relevant schema snippets (tweak number as needed)
+    const topRelevant = scored.slice(0, 3).map((s) => s.text).join("\n\n");
+
+    return topRelevant;
   }
 
   // Set up assistant behavior and tone
@@ -99,26 +132,62 @@ Reply in markdown. Keep responses concise, with clear action suggestions.
   }
 
   // Convert natural language into SQL
-  static buildQueryPrompt(schema: any, teamId: string): ChatCompletionMessageParam {
-    return {
-      role: "system",
-      content: `
-You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema.
+static async buildQueryPrompt(
+  schema: any,
+  teamId: string,
+  userMessage: string,
+  fullSchemaDescriptions: string[]
+): Promise<ChatCompletionMessageParam> {
+  // Enrich schema context with relevant descriptions based on user message embedding
+  const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
 
-## Schema
+  const statusFilterNote = `
+## Important notes about filtering by status:
+- The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
+- Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
+- Instead, filter by joining or subquerying the status table, for example:
+  AND status_id = (SELECT id FROM sys_project_statuses WHERE name = 'Completed')
+- Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
+`;
+
+  const disambiguationNote = `
+## Column Qualification Rules:
+- Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
+- Never use unqualified column names like \`team_id\` if multiple tables contain it.
+- Use consistent aliases: \`t\` for \`tasks\`, \`p\` for \`projects\`, \`tm\` for \`team_members\`, \`u\` for \`users\`, etc.
+- If unsure, refer to the full schema to determine correct table references.
+
+Example:
+Bad: WHERE team_id = '...'
+Good: WHERE p.team_id = '...'
+`;
+
+  return {
+    role: "system",
+    content: `
+You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema and relevant context.
+
+## Relevant Schema Info (most relevant parts)
+${relevantSchemaInfo}
+
+## Full Schema
 \`\`\`json
 ${JSON.stringify(schema, null, 2)}
 \`\`\`
 
-## Notes:
-- Filter all results by team_id = '${teamId}'.
-- Some tables (e.g., tasks) may not have team_id directly.
-- For such tables, join related tables (e.g., projects) to filter by team.
-- Use valid table and column names only.
-- Limit results to 100 rows.
-- Skip internal or irrelevant fields like id, color.
+${statusFilterNote}
 
-Return JSON with:
+${disambiguationNote}
+
+## Additional Notes:
+- Always filter all results by team_id = '${teamId}'.
+- Some tables (e.g., tasks) do not have team_id directly.
+- For such tables, join related tables (e.g., projects) to apply the team filter.
+- Use only valid table and column names from the schema.
+- Limit results to 100 rows.
+- Do not include internal metadata fields like \`id\`, \`color\`, unless requested.
+
+Return JSON in the following format:
 \`\`\`json
 {
   "summary": "...",
@@ -126,9 +195,9 @@ Return JSON with:
   "is_query": true | false
 }
 \`\`\`
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
 
   // Convert SQL result to human response
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
@@ -222,16 +291,33 @@ Explain how you would answer this with SQL or data lookups.
     };
   }
 
-  // 	Create SQL with schema and user context
-  static buildSQLQueryPrompt(data: {
-    userMessage: string;
-    userId: string;
-    teamId: string;
-    schema: any;
-  }): ChatCompletionMessageParam {
-    return {
-      role: "user",
-      content: `
+  // Create SQL with schema and user context
+static buildSQLQueryPrompt(data: {
+  userMessage: string;
+  userId: string;
+  teamId: string;
+  schema: any;
+}): ChatCompletionMessageParam {
+  const statusFilterNote = `
+## Important notes about filtering by status:
+- The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
+- Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
+- Instead, filter by joining or subquerying the status table, for example:
+  AND status_id = (SELECT id FROM sys_project_statuses WHERE name = 'Completed')
+- Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
+`;
+
+  const disambiguationNote = `
+## Column Qualification Rules:
+- Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
+- Never use unqualified column names like \`team_id\` if multiple tables contain it.
+- Use consistent aliases: \`t\` for \`tasks\`, \`p\` for \`projects\`, \`tm\` for \`team_members\`, \`u\` for \`users\`, etc.
+- Refer to the full schema below to avoid ambiguity.
+`;
+
+  return {
+    role: "user",
+    content: `
 ## Database Schema
 \`\`\`json
 ${JSON.stringify(data.schema, null, 2)}
@@ -239,7 +325,11 @@ ${JSON.stringify(data.schema, null, 2)}
 
 ## Team ID: '${data.teamId}'
 
-## Important notes:
+${statusFilterNote}
+
+${disambiguationNote}
+
+## Additional Notes:
 - The "tasks" table does NOT have a "team_id" column.
 - To filter tasks by team, join tasks.project_id = projects.id and filter projects.team_id = '${data.teamId}'.
 - Always restrict data access to team_id = '${data.teamId}' (directly or via join).
@@ -255,11 +345,11 @@ ${JSON.stringify(data.schema, null, 2)}
   "query": "SQL SELECT query string",
   "is_query": true
 }
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
 
-  // 	Turn query output into human insight
+  // Turn query output into human insight
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
     queryResult: any[];

@@ -100,43 +100,70 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
   }
 
   protected static async getQueryData(
-    schema: string,
-    teamId: string,
-    messages: ChatCompletionMessageParam[]
-  ): Promise<string | { summary: string; data: any[] }> {
-    messages.unshift(PromptBuilder.buildQueryPrompt(schema, teamId));
-    const aiResponse = await OpenAIService.createChatCompletion(messages);
+  schema: string,
+  teamId: string,
+  messages: ChatCompletionMessageParam[]
+): Promise<string | { summary: string; data: any[] }> {
+  // Step 1: Extract the last user message
+  const lastUserMessage = messages
+    .slice()
+    .reverse()
+    .find((msg) => msg.role === "user")?.content;
 
-    const cleaned = aiResponse?.content?.replace(/```json|```/g, "").trim() || "{}";
-
-    let result: any;
-    try {
-      result = JSON.parse(cleaned);
-    } catch {
-      return { summary: "Failed to parse AI response.", data: [] };
-    }
-
-    if (!result?.is_query || typeof result.query !== "string" || !result.query.includes(teamId)) {
-      return {
-        summary: result?.summary || "Invalid query.",
-        data: [],
-      };
-    }
-
-    try {
-      const dbResult = await db.query(result.query);
-      return JSON.stringify({
-        summary: result.summary,
-        data: dbResult.rows,
-      });
-    } catch (err) {
-      console.error("Database query error:", err);
-      return {
-        summary: "Database query failed.",
-        data: [],
-      };
-    }
+  if (!lastUserMessage || typeof lastUserMessage !== "string") {
+    return { summary: "Could not extract user message.", data: [] };
   }
+
+  // Step 2: Get full schema representation as string[]
+  const fullSchema = await this.createTableSchema();
+  const fullSchemaDescriptions = fullSchema
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  // Step 3: Await the async prompt builder
+  const queryPrompt = await PromptBuilder.buildQueryPrompt(
+    schema,
+    teamId,
+    lastUserMessage,
+    fullSchemaDescriptions
+  );
+
+  // Step 4: Add prompt to messages and proceed
+  messages.unshift(queryPrompt);
+
+  const aiResponse = await OpenAIService.createChatCompletion(messages);
+
+  const cleaned = aiResponse?.content?.replace(/```json|```/g, "").trim() || "{}";
+
+  let result: any;
+  try {
+    result = JSON.parse(cleaned);
+  } catch {
+    return { summary: "Failed to parse AI response.", data: [] };
+  }
+
+  if (!result?.is_query || typeof result.query !== "string" || !result.query.includes(teamId)) {
+    return {
+      summary: result?.summary || "Invalid query.",
+      data: [],
+    };
+  }
+
+  try {
+    const dbResult = await db.query(result.query);
+    return JSON.stringify({
+      summary: result.summary,
+      data: dbResult.rows,
+    });
+  } catch (err) {
+    console.error("Database query error:", err);
+    return {
+      summary: "Database query failed.",
+      data: [],
+    };
+  }
+}
 
   protected static async createChatWithQueryData(
     dataList: { data: any[] },
