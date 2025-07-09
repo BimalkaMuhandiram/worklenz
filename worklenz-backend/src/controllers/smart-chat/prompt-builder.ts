@@ -9,7 +9,8 @@ export type PromptType =
   | "cot"
   | "hybrid"
   | "sql-query"
-  | "sql-result";
+  | "sql-result"
+  | "enhanced-response"; // Added new prompt type for enhanced responses
 
 export interface PromptInput {
   type: PromptType;
@@ -41,44 +42,40 @@ export class PromptBuilder {
         return this.buildSQLQueryPrompt(input.data);
       case "sql-result":
         return this.buildAnswerFromResultsPrompt(input.data);
+      case "enhanced-response": 
+        return this.buildEnhancedResponsePrompt(input.data);
       default:
-        throw new Error(`Unsupported prompt type: ${input.type}`);
+        // fallback prompt instead of throwing
+        return {
+          role: "system",
+          content: `Unsupported prompt type: "${input.type}". Please provide a valid prompt type such as "query", "response", or "system".`,
+        };
     }
   }
 
   // Enrich schema with closest relevant schema info using embeddings
   private static async enrichSchemaWithRelevantInfo(
     userMessage: string,
-    fullSchemaDescriptions: string[] // pre-embedded schema descriptions as strings
+    fullSchemaDescriptions: string[]
   ): Promise<string> {
-    // 1. Embed user message
     const userEmbedding = await OpenAIService.getEmbedding(userMessage);
-
-    // 2. Embed all schema description texts (batch)
-    // (Assuming you already have precomputed embeddings for these descriptions,
-    //  if not, call getBatchEmbeddings once on startup and cache results)
     const schemaEmbeddings = await OpenAIService.getBatchEmbeddings(fullSchemaDescriptions);
-
-    // 3. Find top relevant schema descriptions by cosine similarity
     const scored = schemaEmbeddings.map((emb, idx) => ({
       score: OpenAIService.cosineSimilarity(userEmbedding, emb),
       text: fullSchemaDescriptions[idx],
     }));
-
     scored.sort((a, b) => b.score - a.score);
-
-    // 4. Take top 3 relevant schema snippets (tweak number as needed)
     const topRelevant = scored.slice(0, 3).map((s) => s.text).join("\n\n");
-
     return topRelevant;
   }
 
-  // Set up assistant behavior and tone
+  // More empathetic, proactive system prompt
   static buildSystemPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
       content: `
-You are a smart assistant for the Worklenz project management platform. Help users manage tasks, timelines, and team collaboration using natural conversation.
+You are a highly intelligent, empathetic assistant for the Worklenz project management platform.
+Help users manage tasks, timelines, and team collaboration using natural, conversational language.
 
 ## Context
 \`\`\`json
@@ -86,27 +83,33 @@ ${JSON.stringify(data, null, 2)}
 \`\`\`
 
 ## Responsibilities
-- Understand various user message types (updates, summaries, questions, assignments).
-- Clarify vague queries.
-- Offer relevant follow-up actions.
-- Interpret casual phrases (e.g., “next week”, “yesterday”).
+- Understand diverse user intents (updates, summaries, questions, assignments, clarifications).
+- Proactively clarify vague or ambiguous queries politely.
+- Offer relevant suggestions and follow-up actions.
+- Interpret casual, relative phrases like "next week", "yesterday", or "ASAP".
+- Use a friendly, confident tone that instills trust and clarity.
 
 ## Format
-- Use markdown.
+- Use markdown formatting.
 - Use \`backticks\` for task names, people, and dates.
 - Never expose raw JSON or internal IDs.
+- If unsure, ask clarifying questions before answering.
 
-Respond clearly and use a helpful, confident tone.
+Respond clearly and helpfully, guiding the user where needed.
       `.trim(),
     };
   }
 
-  // Handle unclear or multi-intent queries
+  // Improved hybrid prompt with richer examples and intent detection
   static buildHybridPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
       content: `
-You are an intelligent assistant for Worklenz. Analyze the user's input and determine the most likely intent: query, update, create, or summarize.
+You are an intelligent assistant for Worklenz. Analyze the user's input carefully to determine their intent:
+- Query (requesting info)
+- Update (changing data)
+- Create (adding new tasks or projects)
+- Summarize (overview or status)
 
 ## Context
 \`\`\`json
@@ -114,34 +117,62 @@ ${JSON.stringify(data.context ?? {}, null, 2)}
 \`\`\`
 
 ## Instructions
-- If user asks a question: respond based on provided data.
-- If user gives an update: confirm before applying.
-- If unclear, ask a clarifying question.
+- If user asks a question: respond factually with relevant data.
+- If user gives an update: confirm details before applying.
+- If user wants to create something: validate inputs and summarize confirmation.
+- If input is ambiguous or has multiple intents: ask clarifying questions.
 
-## Examples of clarifications
+## Clarification Examples
 User: "Show me tasks by Andrew."
 Assistant: "Do you want tasks assigned to Andrew or created by Andrew? Also, which project or team should I look at?"
 
 User: "What is the status?"
 Assistant: "Could you please specify which task or project you are referring to?"
 
+User: "Create a task 'Prepare report'."
+Assistant: "When is the deadline for 'Prepare report'? Who should be assigned?"
+
 ## Output
-Reply in markdown. Keep responses concise, with clear action suggestions.
+Reply in markdown. Keep responses concise and include actionable suggestions.
       `.trim(),
     };
   }
 
-  // Convert natural language into SQL
-static async buildQueryPrompt(
-  schema: any,
-  teamId: string,
-  userMessage: string,
-  fullSchemaDescriptions: string[]
-): Promise<ChatCompletionMessageParam> {
-  // Enrich schema context with relevant descriptions based on user message embedding
-  const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
+  // New prompt for enhancing any kind of user response with empathy, clarity, and follow-ups
+  static buildEnhancedResponsePrompt(data: { userMessage: string; previousResponse?: string }): ChatCompletionMessageParam {
+    return {
+      role: "system",
+      content: `
+You are an assistant refining responses for diverse user inputs.
 
-  const statusFilterNote = `
+User message:
+"${data.userMessage}"
+
+${data.previousResponse ? `Previous assistant response:
+${data.previousResponse}\n` : ""}
+
+Instructions:
+- Make the response clear, friendly, and engaging.
+- If the input is ambiguous or incomplete, ask polite clarifying questions.
+- Anticipate possible user needs and suggest helpful next steps.
+- Use markdown with \`backticks\` for key terms.
+- Keep responses concise but informative.
+
+If the user query is complex or multi-part, break down the response into clear sections.
+      `.trim(),
+    };
+  }
+
+  // Convert natural language into SQL with enriched context
+  static async buildQueryPrompt(
+    schema: any,
+    teamId: string,
+    userMessage: string,
+    fullSchemaDescriptions: string[]
+  ): Promise<ChatCompletionMessageParam> {
+    const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
+
+    const statusFilterNote = `
 ## Important notes about filtering by status:
 - The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
 - Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
@@ -150,7 +181,7 @@ static async buildQueryPrompt(
 - Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
 `;
 
-  const disambiguationNote = `
+    const disambiguationNote = `
 ## Column Qualification Rules:
 - Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
 - Never use unqualified column names like \`team_id\` if multiple tables contain it.
@@ -162,9 +193,9 @@ Bad: WHERE team_id = '...'
 Good: WHERE p.team_id = '...'
 `;
 
-  return {
-    role: "system",
-    content: `
+    return {
+      role: "system",
+      content: `
 You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema and relevant context.
 
 ## Relevant Schema Info (most relevant parts)
@@ -195,11 +226,11 @@ Return JSON in the following format:
   "is_query": true | false
 }
 \`\`\`
-    `.trim(),
-  };
-}
+      `.trim(),
+    };
+  }
 
-  // Convert SQL result to human response
+  // Convert SQL result to human-readable summary with enhancements
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
     const { items, teamId } = data;
     const filteredItems = Array.isArray(items)
@@ -217,17 +248,18 @@ ${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
 \`\`\`
 
 ## Instructions
-- Summarize the results clearly.
+- Summarize the results clearly and helpfully.
 - Highlight overdue or high-priority items.
+- Mention if no data was found.
 - Limit output to the top 10 results.
 - Use \`backticks\` for names and dates.
 
-Say "No data found" if the list is empty.
+If the list is empty, say "No data found".
       `.trim(),
     };
   }
 
-  // Demonstrate examples for better query generation
+  // few-shot examples with more diverse queries
   static buildFewShotPrompt(
     data: any,
     examples: ReadonlyArray<{ user: string; assistant: string }>
@@ -248,6 +280,22 @@ Say "No data found" if the list is empty.
   "summary": "Overdue tasks",
   "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.due_date < CURRENT_DATE AND p.team_id = '...' LIMIT 100",
   "is_query": true
+}`,
+        },
+        {
+          user: "What tasks were completed last week?",
+          assistant: `{
+  "summary": "Tasks completed last week",
+  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.completed_date BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE AND p.team_id = '...' LIMIT 100",
+  "is_query": true
+}`,
+        },
+        {
+          user: "Create a new task 'Prepare presentation' assigned to Alice.",
+          assistant: `{
+  "summary": "Create task 'Prepare presentation' assigned to Alice",
+  "query": "INSERT INTO tasks (name, assignee, project_id) VALUES ('Prepare presentation', 'Alice', (SELECT id FROM projects WHERE name = '...' LIMIT 1))",
+  "is_query": false
 }`,
         },
       ];
@@ -277,28 +325,30 @@ Now convert the following user query:
     };
   }
 
-  // Break down reasoning steps
+  // chain-of-thought with more explicit reasoning steps prompt
   static buildChainOfThoughtPrompt(data: any): ChatCompletionMessageParam {
     return {
       role: "system",
       content: `
-You are a reasoning assistant. Break down the user's query into logical steps.
+You are a reasoning assistant. Break down the user's query into clear, logical steps.
 
 User message: "${data.userMessage}"
 
-Explain how you would answer this with SQL or data lookups.
+Explain step-by-step how you would translate this into SQL or data lookups.
+
+Highlight any assumptions and potential ambiguities, and how you would verify them.
       `.trim(),
     };
   }
 
-  // Create SQL with schema and user context
-static buildSQLQueryPrompt(data: {
-  userMessage: string;
-  userId: string;
-  teamId: string;
-  schema: any;
-}): ChatCompletionMessageParam {
-  const statusFilterNote = `
+  // Create SQL with schema and user context (same as original)
+  static buildSQLQueryPrompt(data: {
+    userMessage: string;
+    userId: string;
+    teamId: string;
+    schema: any;
+  }): ChatCompletionMessageParam {
+    const statusFilterNote = `
 ## Important notes about filtering by status:
 - The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
 - Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
@@ -307,7 +357,7 @@ static buildSQLQueryPrompt(data: {
 - Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
 `;
 
-  const disambiguationNote = `
+    const disambiguationNote = `
 ## Column Qualification Rules:
 - Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
 - Never use unqualified column names like \`team_id\` if multiple tables contain it.
@@ -315,9 +365,9 @@ static buildSQLQueryPrompt(data: {
 - Refer to the full schema below to avoid ambiguity.
 `;
 
-  return {
-    role: "user",
-    content: `
+    return {
+      role: "user",
+      content: `
 ## Database Schema
 \`\`\`json
 ${JSON.stringify(data.schema, null, 2)}
@@ -345,11 +395,11 @@ ${disambiguationNote}
   "query": "SQL SELECT query string",
   "is_query": true
 }
-    `.trim(),
-  };
-}
+      `.trim(),
+    };
+  }
 
-  // Turn query output into human insight
+  // Turn query output into human insight (same as original)
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
     queryResult: any[];

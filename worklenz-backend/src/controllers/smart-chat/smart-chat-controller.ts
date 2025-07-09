@@ -7,6 +7,39 @@ import SmartChatControllerBase from "./smart-chat-controller-base";
 import { ChatLogCreateSchema, ChatInfoRequestSchema } from "./chat.schema";
 import { OpenAIService } from "./openai-service";
 
+function injectTeamIdFilter(sqlQuery: string, teamId: string): string {
+  // Try to find the main table alias from FROM clause, e.g. "FROM tasks t"
+  const fromMatch = /from\s+[\w.]+\s+(\w+)/i.exec(sqlQuery);
+  const alias = fromMatch ? fromMatch[1] : null;
+
+  if (!alias) {
+    // fallback: just use team_id without alias (may cause error if ambiguous)
+    console.warn("Could not detect table alias in SQL, injecting unqualified team_id");
+    return sqlQuery.replace(/where\s+/i, (match) => `${match} team_id = '${teamId}' AND `);
+  }
+
+  // Inject team_id filter qualified with alias, e.g., t.team_id = '...'
+  if (/where\s+/i.test(sqlQuery)) {
+    return sqlQuery.replace(/where\s+/i, (match) => `${match} ${alias}.team_id = '${teamId}' AND `);
+  } else {
+    // No WHERE clause found; add it after FROM clause
+    const fromEndIndex = sqlQuery.toLowerCase().indexOf("from") + 4;
+    // Find position after FROM table alias
+    const afterFromMatch = /from\s+[\w.]+\s+\w+/i.exec(sqlQuery);
+    if (afterFromMatch) {
+      const insertPos = afterFromMatch.index + afterFromMatch[0].length;
+      return (
+        sqlQuery.slice(0, insertPos) +
+        ` WHERE ${alias}.team_id = '${teamId}'` +
+        sqlQuery.slice(insertPos)
+      );
+    } else {
+      // fallback: append at the end (not recommended)
+      return sqlQuery + ` WHERE ${alias}.team_id = '${teamId}'`;
+    }
+  }
+}
+
 export default class SmartchatController extends SmartChatControllerBase {
   @HandleExceptions()
   public static async create(req: IWorkLenzRequest, res: IWorkLenzResponse): Promise<IWorkLenzResponse> {
@@ -45,7 +78,11 @@ export default class SmartchatController extends SmartChatControllerBase {
     }
 
     const { chat: messages } = validation.data;
-    const userMessage = messages[messages.length - 1]?.content ?? "";
+    const lastMessage = messages[messages.length - 1];
+    const userMessage =
+      typeof lastMessage.content === "string"
+        ? lastMessage.content
+        : lastMessage.content.map((c) => c.text).join(" ");
 
     const schema = this.getTableSchema();
     if (!schema) {
@@ -75,17 +112,7 @@ export default class SmartchatController extends SmartChatControllerBase {
     const lowerQuery = sqlQuery.toLowerCase();
     if (!/where\s+.*team_id\s*=/.test(lowerQuery)) {
       if (/select\s+/.test(lowerQuery) && /from\s+/.test(lowerQuery)) {
-        if (/where\s+/i.test(lowerQuery)) {
-          sqlQuery = sqlQuery.replace(/where\s+/i, (match: string) => `${match} p.team_id = '${teamId}' AND `);
-        } else {
-          const fromMatch = /from\s+[\w.]+/i.exec(sqlQuery);
-          if (fromMatch) {
-            const insertPos = fromMatch.index + fromMatch[0].length;
-            sqlQuery = sqlQuery.slice(0, insertPos) + ` WHERE p.team_id = '${teamId}'` + sqlQuery.slice(insertPos);
-          } else {
-            sqlQuery += ` WHERE team_id = '${teamId}'`;
-          }
-        }
+        sqlQuery = injectTeamIdFilter(sqlQuery, teamId);
         console.log("Modified SQL Query with team_id filter:", sqlQuery);
       } else {
         console.warn("SQL does not look like a standard SELECT...FROM query. Skipping filter injection.");
