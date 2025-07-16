@@ -10,7 +10,7 @@ export type PromptType =
   | "hybrid"
   | "sql-query"
   | "sql-result"
-  | "enhanced-response"; // Added new prompt type for enhanced responses
+  | "enhanced-response"; 
 
 export interface PromptInput {
   type: PromptType;
@@ -55,19 +55,39 @@ export class PromptBuilder {
 
   // Enrich schema with closest relevant schema info using embeddings
   private static async enrichSchemaWithRelevantInfo(
-    userMessage: string,
-    fullSchemaDescriptions: string[]
-  ): Promise<string> {
-    const userEmbedding = await OpenAIService.getEmbedding(userMessage);
-    const schemaEmbeddings = await OpenAIService.getBatchEmbeddings(fullSchemaDescriptions);
-    const scored = schemaEmbeddings.map((emb, idx) => ({
-      score: OpenAIService.cosineSimilarity(userEmbedding, emb),
-      text: fullSchemaDescriptions[idx],
-    }));
-    scored.sort((a, b) => b.score - a.score);
-    const topRelevant = scored.slice(0, 3).map((s) => s.text).join("\n\n");
-    return topRelevant;
-  }
+  userMessage: string,
+  fullSchemaDescriptions: any[] // now expect schema as array of table objects with columns
+): Promise<string> {
+  // Build detailed descriptions with table names, aliases, and columns
+  const detailedDescriptions = fullSchemaDescriptions.map((table) => {
+    // Assume each table has: { name, alias, columns: { colName: colType, ... } }
+    const columnsText = Object.entries(table.columns || {})
+      .map(([col, type]) => `- \`${col}\`: ${type}`)
+      .join("\n");
+
+    return `### Table: ${table.name} (alias \`${table.alias}\`)\n${columnsText}`;
+  });
+
+  // Get embeddings for each detailed description
+  const schemaEmbeddings = await OpenAIService.getBatchEmbeddings(detailedDescriptions);
+
+  // Get embedding for user message
+  const userEmbedding = await OpenAIService.getEmbedding(userMessage);
+
+  // Calculate similarity scores
+  const scored = schemaEmbeddings.map((emb, idx) => ({
+    score: OpenAIService.cosineSimilarity(userEmbedding, emb),
+    text: detailedDescriptions[idx],
+  }));
+
+  // Sort by relevance
+  scored.sort((a, b) => b.score - a.score);
+
+  // Take top 3 most relevant table descriptions
+  const topRelevant = scored.slice(0, 3).map((s) => s.text).join("\n\n");
+
+  return topRelevant;
+}
 
   // More empathetic, proactive system prompt
   static buildSystemPrompt(data: any): ChatCompletionMessageParam {
@@ -165,70 +185,83 @@ If the user query is complex or multi-part, break down the response into clear s
 
   // Convert natural language into SQL with enriched context
   static async buildQueryPrompt(
-    schema: any,
-    teamId: string,
-    userMessage: string,
-    fullSchemaDescriptions: string[]
-  ): Promise<ChatCompletionMessageParam> {
-    const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
+  schema: any,
+  teamId: string,
+  userMessage: string,
+  fullSchemaDescriptions: any[]
+): Promise<ChatCompletionMessageParam> {
+  const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
 
-    const statusFilterNote = `
-## Important notes about filtering by status:
-- The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
-- Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
-- Instead, filter by joining or subquerying the status table, for example:
+  const joinUserNameNote = `
+## How to get team member names:
+- The \`team_members\` table does NOT contain name columns.
+- To get names, join \`team_members.user_id = users.id\` and use \`users.full_name\` or \`users.name\`.
+- Use alias \`tm\` for \`team_members\`, \`u\` for \`users\`.
+`;
+
+  const statusFilterNote = `
+## Filtering by status:
+- The \`status_id\` column refers to \`sys_project_statuses.id\`.
+- To filter by status name (e.g. 'Completed'), use:
   AND status_id = (SELECT id FROM sys_project_statuses WHERE name = 'Completed')
-- Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
 `;
 
-    const disambiguationNote = `
-## Column Qualification Rules:
-- Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
-- Never use unqualified column names like \`team_id\` if multiple tables contain it.
-- Use consistent aliases: \`t\` for \`tasks\`, \`p\` for \`projects\`, \`tm\` for \`team_members\`, \`u\` for \`users\`, etc.
-- If unsure, refer to the full schema to determine correct table references.
-
-Example:
-Bad: WHERE team_id = '...'
-Good: WHERE p.team_id = '...'
+  const teamFilterNote = `
+## Filtering by team:
+- NOT all tables have a \`team_id\` column.
+- NEVER assume \`team_id\` exists on \`tasks\` or \`team_members\`.
+- Instead, JOIN related tables like \`projects\` and apply \`team_id\` filter there:
+  Example: JOIN projects p ON t.project_id = p.id WHERE p.team_id = '${teamId}'
 `;
 
-    return {
-      role: "system",
-      content: `
-You are a database-aware assistant. Translate natural language into a PostgreSQL SELECT query using the provided schema and relevant context.
+  const disambiguationNote = `
+## Column usage:
+- Always qualify columns with table aliases (e.g., \`t.end_date\`, \`p.team_id\`).
+- Avoid using columns that do not exist.
+- Use aliases consistently: \`t\` = tasks, \`p\` = projects, \`u\` = users, \`tm\` = team_members.
+`;
 
-## Relevant Schema Info (most relevant parts)
+  return {
+    role: "system",
+    content: `
+You are a SQL assistant. Translate natural language into a valid PostgreSQL SELECT query using the schema below.
+
+## Relevant Schema
 ${relevantSchemaInfo}
+
+${joinUserNameNote}
+
+${teamFilterNote}
+
+${statusFilterNote}
+
+${disambiguationNote}
 
 ## Full Schema
 \`\`\`json
 ${JSON.stringify(schema, null, 2)}
 \`\`\`
 
-${statusFilterNote}
-
-${disambiguationNote}
-
-## Additional Notes:
-- Always filter all results by team_id = '${teamId}'.
-- Some tables (e.g., tasks) do not have team_id directly.
-- For such tables, join related tables (e.g., projects) to apply the team filter.
-- Use only valid table and column names from the schema.
-- Limit results to 100 rows.
-- Do not include internal metadata fields like \`id\`, \`color\`, unless requested.
-
-Return JSON in the following format:
+## Output Format
 \`\`\`json
 {
   "summary": "...",
   "query": "...",
-  "is_query": true | false
+  "is_query": true
 }
 \`\`\`
-      `.trim(),
-    };
-  }
+
+## Instructions
+- Only use columns and tables that exist.
+- Always apply \`team_id = '${teamId}'\` by JOINING the appropriate table (e.g., \`projects\`).
+- Never filter on non-existent columns like \`t.team_id\` or \`tm.name\`.
+- Limit result rows to 100.
+- Avoid subqueries unless necessary.
+
+Natural language: "${userMessage}"
+    `.trim(),
+  };
+}
 
   // Convert SQL result to human-readable summary with enhancements
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
