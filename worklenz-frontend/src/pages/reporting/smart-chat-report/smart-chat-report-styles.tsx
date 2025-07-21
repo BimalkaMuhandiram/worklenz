@@ -26,13 +26,18 @@ export const editTextareaStyle = css`
   padding: 8px;
   font-size: 14px;
   resize: vertical;
+  min-height: 60px;
+  background-color: var(--background-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
 `;
 
 // Edit buttons
 export const editButtonsContainer = css`
-  margin-top: 4px;
+  margin-top: 8px;
   display: flex;
-  gap: 8px;
+  gap: 12px;
+  justify-content: flex-end;
 `;
 
 // Markdown table
@@ -79,7 +84,7 @@ export const bubbleUserStyle = css`
   background-color: var(--user-bubble-bg);
   color: var(--user-bubble-text);
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 16px;
   margin-bottom: 8px;
   max-width: 80%;
 `;
@@ -89,7 +94,46 @@ export const bubbleAssistantStyle = css`
   background-color: var(--assistant-bubble-bg);
   color: var(--assistant-bubble-text);
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 16px;
   margin-bottom: 8px;
   max-width: 80%;
+`;
+
+export const suggestionsBoxStyle = css`
+  background-color: var(--suggestion-bg);
+  color: var(--suggestion-text);
+  padding: 16px;
+  border-radius: 12px;
+  margin-top: 12px;
+  max-width: 80%;
+  align-self: flex-start;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+`;
+
+export const suggestionsTitleStyle = css`
+  font-weight: bold;
+  margin-bottom: 8px;
+  color: var(--suggestion-text);
+`;
+
+export const suggestionItemStyle = css`
+  cursor: pointer;
+  color: var(--suggestion-link);
+  margin-bottom: 6px;
+  transition: color 0.2s;
+
+  &:hover {
+    color: var(--suggestion-link-hover);
+  }
+`;
+
+// Sticky input container (for bottom input area)
+export const stickyInputContainerStyle = css`
+  position: sticky;
+  bottom: 0;
+  background-color: var(--background-color);
+  padding-top: 12px;
+  padding-bottom: 12px;
+  z-index: 10;
+  border-top: 1px solid var(--border-color);
 `;

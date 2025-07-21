@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css } from '@emotion/react';
 import React, { useEffect, useState, useRef } from 'react';
-import { Typography, Flex, Button } from 'antd';
+import { Typography, Flex, Button, message as antdMessage } from 'antd';
 import {
   Bubble,
   BubbleProps,
@@ -26,107 +26,29 @@ import { IChatMessage } from '@/types/aiChat/ai-chat.types';
 import { firstScreenPrompts, senderPromptsItems } from './prompt';
 import AssistantIcon from '../../../assets/icons/worklenz_ai_light.png';
 import welcomeScreenIcon from '../../../assets/icons/worklenz_ai.png';
-import { message as antdMessage } from 'antd';
 import copy from 'copy-to-clipboard';
-import { markdownTableStyle } from './smart-chat-report-styles';
+
 import {
-  BarChart, Bar,
-  LineChart, Line,
-  PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts';
+  containerStyle,
+  bubbleUserStyle,
+  bubbleAssistantStyle,
+  markdownTableStyle,
+  suggestionsBoxStyle,
+  suggestionsTitleStyle,
+  suggestionItemStyle,
+  stickyInputContainerStyle,
+} from './smart-chat-report-styles';
 
 const md = Markdownit({ html: false, breaks: true });
 
-const renderAssistantMessage: BubbleProps['messageRender'] = (content) => {
-  try {
-    const parsed = JSON.parse(content);
-
-    if (parsed.type === 'chart' && Array.isArray(parsed.data)) {
-      const { chartType, data, title } = parsed;
-
-      const chartColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7f50'];
-
-      const keys = Object.keys(data[0]).filter((key) => key !== 'name');
-
-      return (
-        <div style={{ width: '100%', height: 300 }}>
-          <Typography.Title level={5}>{title}</Typography.Title>
-          <ResponsiveContainer width="100%" height="100%">
-            {
-              (() => {
-                switch (chartType) {
-                  case 'bar':
-                    return (
-                      <BarChart data={data}>
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        {keys.map((key, index) => (
-                          <Bar key={key} dataKey={key} fill={chartColors[index % chartColors.length]} />
-                        ))}
-                      </BarChart>
-                    );
-                  case 'line':
-                    return (
-                      <LineChart data={data}>
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        {keys.map((key, index) => (
-                          <Line key={key} type="monotone" dataKey={key} stroke={chartColors[index % chartColors.length]} />
-                        ))}
-                      </LineChart>
-                    );
-                  case 'pie':
-                    return (
-                      <PieChart width={400} height={300}>
-                        <Tooltip />
-                        <Legend />
-                        <Pie
-                          data={data}
-                          dataKey={keys[0]}
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={80}
-                          label
-                        >
-                          {data.map((entry: Record<string, any>, index: number) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={chartColors[index % chartColors.length]}
-                            />
-                          ))}
-
-                        </Pie>
-                      </PieChart>
-                    );
-
-                  default:
-                    return <div>Unsupported chart type: {chartType}</div>;
-                }
-              })()
-            }
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-  } catch (err) {
-    // Not a chart, fall back to Markdown
-  }
-
-  return (
-    <Typography>
-      <div
-        css={markdownTableStyle}
-        dangerouslySetInnerHTML={{ __html: md.render(content) }}
-      />
-    </Typography>
-  );
-};
+const renderAssistantMessage: BubbleProps['messageRender'] = (content) => (
+  <Typography>
+    <div
+      css={markdownTableStyle}
+      dangerouslySetInnerHTML={{ __html: md.render(content) }}
+    />
+  </Typography>
+);
 
 const SmartChatReport = () => {
   const [messageInput, setMessageInput] = useState('');
@@ -139,7 +61,7 @@ const SmartChatReport = () => {
   const [organization, setOrganization] = useState<Record<string, any> | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date().toDateString());
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  
+
   const includeArchivedProjects = useAppSelector(
     (state) => state.reportingReducer.includeArchivedProjects
   );
@@ -149,7 +71,6 @@ const SmartChatReport = () => {
   const [editingContent, setEditingContent] = useState('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -207,7 +128,7 @@ const SmartChatReport = () => {
     );
 
     cancelEdit();
-    await handleSend(editingContent, true); // Use retry flag to avoid adding new message
+    await handleSend(editingContent, true);
   };
 
   const deleteMessage = (id: string) => {
@@ -219,119 +140,96 @@ const SmartChatReport = () => {
     handleSend(info.data.description as string);
   };
 
-const handleSend = async (inputMessage: string, isRetry = false) => {
-  if (!inputMessage.trim() || loading) return;
+  const handleSend = async (inputMessage: string, isRetry = false) => {
+    if (!inputMessage.trim() || loading) return;
 
-  const timestamp = new Date().toISOString();
-
-  if (!isRetry) {
-    const userMessage: IChatMessageWithStatus = {
-      role: 'user',
-      content: inputMessage,
-      timestamp,
-      status: 'pending',
-    };
-    setChatMessages((prev) => [...prev, userMessage]);
-  }
-
-  const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
-    .slice(-20)
-    .map(({ role, content }) => ({ role, content }));
-
-  setLoading(true);
-  setMessageInput('');
-  setIsTyping(true);
-
-  try {
-    const requestBody = { chat: trimmedMessages };
-    const response = await reportingApiService.getChat(requestBody);
-
-    let responseText = 'Sorry, no response from assistant.';
-    let newSuggestions: string[] = [];
-
-    if (response?.body) {
-      responseText = response.body.answer || responseText;
-      newSuggestions = response.body.suggestions || [];
-    }
+    const timestamp = new Date().toISOString();
 
     if (!isRetry) {
+      const userMessage: IChatMessageWithStatus = {
+        role: 'user',
+        content: inputMessage,
+        timestamp,
+        status: 'pending',
+      };
+      setChatMessages((prev) => [...prev, userMessage]);
+    }
+
+    const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
+      .slice(-20)
+      .map(({ role, content }) => ({ role, content }));
+
+    setLoading(true);
+    setMessageInput('');
+    setIsTyping(true);
+
+    try {
+      const requestBody = { chat: trimmedMessages };
+      const response = await reportingApiService.getChat(requestBody);
+
+      let responseText = 'Sorry, no response from assistant.';
+      let newSuggestions: string[] = [];
+
+      if (response?.body) {
+        responseText = response.body.answer || responseText;
+        newSuggestions = response.body.suggestions || [];
+      }
+
+      if (!isRetry) {
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.content === inputMessage && msg.status === 'pending'
+              ? { ...msg, status: 'sent' }
+              : msg
+          )
+        );
+      }
+
+      setSuggestions(newSuggestions);
+
+      const aiMessage: IChatMessageWithStatus = {
+        role: 'assistant',
+        content: responseText,
+        timestamp: new Date().toISOString(),
+        status: 'sent',
+      };
+
+      setTimeout(() => {
+        setChatMessages((prev) => [...prev, aiMessage]);
+        setIsTyping(false);
+      }, 500);
+    } catch (error) {
+      logger.error('handleSend', error);
       setChatMessages((prev) =>
         prev.map((msg) =>
-          msg.content === inputMessage && msg.status === 'pending'
-            ? { ...msg, status: 'sent' }
+          msg.content === inputMessage && msg.role === 'user'
+            ? { ...msg, status: 'failed' }
             : msg
         )
       );
-    }
-
-    setSuggestions(newSuggestions);
-
-    const aiMessage: IChatMessageWithStatus = {
-      role: 'assistant',
-      content: responseText,
-      timestamp: new Date().toISOString(),
-      status: 'sent',
-    };
-
-    setTimeout(() => {
-      setChatMessages((prev) => [...prev, aiMessage]);
       setIsTyping(false);
-    }, 500);
-  } catch (error) {
-    logger.error('handleSend', error);
-    setChatMessages((prev) =>
-      prev.map((msg) =>
-        msg.content === inputMessage && msg.role === 'user'
-          ? { ...msg, status: 'failed' }
-          : msg
-      )
-    );
-    setIsTyping(false);
-    antdMessage.error('Failed to send message. Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
+      antdMessage.error('Sorry, something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-
-   // Handle suggestion click to send follow-up question immediately
   const onSuggestionClick = (suggestion: string) => {
     setMessageInput(suggestion);
     handleSend(suggestion);
   };
 
   const retrySend = async (msg: IChatMessageWithStatus) => {
-  
-  setChatMessages((prev) =>
-    prev.map((m) =>
-      m.timestamp === msg.timestamp
-        ? { ...m, status: 'pending' }
-        : m
-    )
-  );
+    setChatMessages((prev) =>
+      prev.map((m) =>
+        m.timestamp === msg.timestamp
+          ? { ...m, status: 'pending' }
+          : m
+      )
+    );
 
-  // Send the same content again
-  await handleSend(msg.content, true);
-};
-
-  const containerStyle = css`
-    background-color: var(--background-color);
-    color: var(--text-color);
-    height: 100vh;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-  `;
-
-  const bubbleUserStyle = css`
-    background-color: var(--user-bubble-bg);
-    color: var(--user-bubble-text);
-  `;
-
-  const bubbleAssistantStyle = css`
-    background-color: var(--assistant-bubble-bg);
-    color: var(--assistant-bubble-text);
-  `;
+    await handleSend(msg.content, true);
+  };
 
   return (
     <Flex
@@ -347,6 +245,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
           flex: 1,
           overflowY: 'auto',
           paddingRight: 8,
+          paddingBottom: 120,
         }}
       >
         {chatMessages.length > 0 ? (
@@ -374,14 +273,14 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                     style={{
                       marginTop: 8,
                       display: 'flex',
-                      gap: 8,
+                      gap: 12,
                       justifyContent: 'flex-end',
                     }}
                   >
                     <Button type="primary" onClick={saveEdit}>
-                      Save
+                      💾 Save
                     </Button>
-                    <Button onClick={cancelEdit}>Cancel</Button>
+                    <Button onClick={cancelEdit}>❌ Cancel</Button>
                   </div>
                 </>
               ) : (
@@ -395,7 +294,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                         ? bubbleUserStyle
                         : bubbleAssistantStyle
                     }
-                    style={{ borderRadius: 16, marginRight: '1rem', maxWidth: '90%' }}
+                    style={{ borderRadius: 16, marginRight: '1rem', maxWidth: '85%', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)' }}
                   />
 
                   {msg.status === 'failed' && msg.role === 'user' && (
@@ -462,22 +361,15 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
         )}
 
         {suggestions.length > 0 && (
-  <div
-    style={{
-      backgroundColor: 'var(--assistant-bubble-bg)',
-      padding: '12px',
-      borderRadius: '12px',
-      marginTop: '8px',
-      maxWidth: '80%',
-      alignSelf: 'flex-start',
-    }}
-  >
-    <Typography.Text strong>Suggestions:</Typography.Text>
-    <ul style={{ marginTop: '8px', paddingLeft: '20px' }}>
+  <div css={suggestionsBoxStyle}>
+    <Typography.Text css={suggestionsTitleStyle}>
+      Suggestions:
+    </Typography.Text>
+    <ul style={{ paddingLeft: '20px', margin: 0 }}>
       {suggestions.map((suggestion, index) => (
         <li
           key={index}
-          style={{ cursor: 'pointer', color: '#1890ff', marginBottom: '6px' }}
+          css={suggestionItemStyle}
           onClick={() => onSuggestionClick(suggestion)}
         >
           {suggestion}
@@ -486,7 +378,6 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
     </ul>
   </div>
 )}
-
 
         {showPrompts && (
           <>
@@ -504,25 +395,28 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
             />
             <Flex justify="center" align="center">
               <Prompts
-  items={firstScreenPrompts}
-  onItemClick={onPromptsItemClick}
-  styles={{
-    item: {
-      backgroundColor: 'var(--prompt-bg)',
-      color: 'var(--prompt-text)',
-      border: '1px solid var(--prompt-border)',
-    },
-  }}
-/>
-
+                items={firstScreenPrompts}
+                onItemClick={onPromptsItemClick}
+                styles={{
+                  item: {
+                    backgroundColor: 'var(--prompt-bg)',
+                    color: 'var(--prompt-text)',
+                    border: '1px solid var(--prompt-border)',
+                  },
+                }}
+              />
             </Flex>
           </>
         )}
         <div ref={chatEndRef} />
-        
       </Flex>
 
-      <Flex justify="center" align="flex-end" style={{ fontSize: '5em' }} vertical>
+      <Flex
+        justify="center"
+        align="flex-end"
+        css={stickyInputContainerStyle}
+        vertical
+      >
         {chatMessages.length < 3 && (
           <Prompts
             styles={{ item: { borderRadius: 50 } }}
@@ -530,9 +424,6 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
             onItemClick={onPromptsItemClick}
           />
         )}
-      </Flex>
-
-      <Flex justify="center" align="flex-end" style={{ paddingTop: '1rem' }} vertical>
         <Sender
           loading={loading}
           placeholder="Type your message here...."

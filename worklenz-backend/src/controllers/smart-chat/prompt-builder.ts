@@ -115,6 +115,10 @@ ${JSON.stringify(data, null, 2)}
 - Never expose raw JSON or internal IDs.
 - If unsure, ask clarifying questions before answering.
 
+## WARNING
+- ONLY use tables and columns explicitly listed in the schema below.
+- Do NOT guess or make up table names or column names.
+
 Respond clearly and helpfully, guiding the user where needed.
       `.trim(),
     };
@@ -225,6 +229,17 @@ If the user query is complex or multi-part, break down the response into clear s
     role: "system",
     content: `
 You are a SQL assistant. Translate natural language into a valid PostgreSQL SELECT query using the schema below.
+
+## WARNING
+- ONLY use tables and columns explicitly listed in the schema below.
+- Do NOT guess or make up table names or column names.
+- If a column or table is missing, ask for clarification.
+
+## Common Mistakes to Avoid
+- Referencing \`tasks.team_id\` — this column does NOT exist.
+- Using \`team_members.name\` — use a JOIN with \`users\` to get names.
+- Referencing \`task_status_categories\` — this table does NOT exist.
+- Use JOINs and aliases exactly as shown below.
 
 ## Relevant Schema
 ${relevantSchemaInfo}
@@ -376,12 +391,21 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
 
   // Create SQL with schema and user context (same as original)
   static buildSQLQueryPrompt(data: {
-    userMessage: string;
-    userId: string;
-    teamId: string;
-    schema: any;
-  }): ChatCompletionMessageParam {
-    const statusFilterNote = `
+  userMessage: string;
+  userId: string;
+  teamId: string;
+  schema: any;
+}): ChatCompletionMessageParam {
+  const joinUsersNote = `
+## Important note about team member names:
+- The \`team_members\` table does NOT have a \`name\` column.
+- To filter or select user names, JOIN the \`users\` table using \`team_members.user_id = users.id\`.
+- Use alias \`tm\` for \`team_members\` and \`u\` for \`users\`.
+- Refer to user names as \`u.name\`, NOT \`tm.name\`.
+- NEVER use \`tm.name\`.
+`;
+
+  const statusFilterNote = `
 ## Important notes about filtering by status:
 - The column \`status_id\` is a UUID referencing \`sys_project_statuses.id\`.
 - Do NOT compare \`status_id\` directly to strings like 'completed' or 'in progress'.
@@ -390,7 +414,7 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
 - Only use tables that exist in the schema. The table \`task_status_categories\` does NOT exist.
 `;
 
-    const disambiguationNote = `
+  const disambiguationNote = `
 ## Column Qualification Rules:
 - Always qualify ambiguous columns using table aliases (e.g., \`t.team_id\`, \`p.team_id\`, \`tm.team_id\`).
 - Never use unqualified column names like \`team_id\` if multiple tables contain it.
@@ -398,19 +422,26 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
 - Refer to the full schema below to avoid ambiguity.
 `;
 
-    return {
-      role: "user",
-      content: `
+  return {
+    role: "user",
+    content: `
+## WARNING
+- Use only columns and tables explicitly shown in the schema.
+- NEVER use \`tm.name\`; always join \`users u\` to get user names.
+- If uncertain, return an error or ask for clarification.
+
+${joinUsersNote}
+
+${statusFilterNote}
+
+${disambiguationNote}
+
 ## Database Schema
 \`\`\`json
 ${JSON.stringify(data.schema, null, 2)}
 \`\`\`
 
 ## Team ID: '${data.teamId}'
-
-${statusFilterNote}
-
-${disambiguationNote}
 
 ## Additional Notes:
 - The "tasks" table does NOT have a "team_id" column.
@@ -428,9 +459,9 @@ ${disambiguationNote}
   "query": "SQL SELECT query string",
   "is_query": true
 }
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
 
   // Turn query output into human insight (same as original)
   static buildAnswerFromResultsPrompt(data: {

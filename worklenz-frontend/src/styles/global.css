@@ -8,6 +8,10 @@
   --prompt-bg: #f0f0f0;
   --prompt-text: #000;
   --prompt-border: #d9d9d9;
+  --suggestion-bg: #f0f2f5;
+  --suggestion-text: #000;
+  --suggestion-link: #1890ff;
+  --suggestion-link-hover: #40a9ff;
 }
 
 [data-theme='dark'] {
@@ -20,4 +24,8 @@
   --prompt-bg: #333;
   --prompt-text: #fff;
   --prompt-border: #444;
+  --suggestion-bg: #2e2c2c;
+  --suggestion-text: #fff;
+  --suggestion-link: #40a9ff;
+  --suggestion-link-hover: #69c0ff;
 }
