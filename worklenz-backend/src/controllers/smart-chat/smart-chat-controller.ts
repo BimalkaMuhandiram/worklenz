@@ -130,7 +130,13 @@ export default class SmartchatController extends SmartChatControllerBase {
         sql: sqlQuery,
         stack: err.stack,
       });
-      return res.status(500).send(new ServerResponse(false, "Query execution failed."));
+      return res.status(200).send(
+        new ServerResponse(true, {
+          answer: "Sorry, I couldn’t find the data you’re looking for.",
+          suggestions: [], 
+        })
+      );
+
     }
 
     // STEP 4: Generate natural language response

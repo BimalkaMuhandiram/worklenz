@@ -70,10 +70,18 @@ const SmartChatReport = () => {
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState('');
 
+  // New ref for chat container (scrollable div)
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Scroll to bottom when chatMessages or isTyping changes
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
   }, [chatMessages, isTyping]);
 
   useEffect(() => {
@@ -83,14 +91,6 @@ const SmartChatReport = () => {
   const handleCopy = (text: string) => {
     copy(text);
     antdMessage.success('Copied to clipboard!');
-  };
-
-  const handleLike = (msg: IChatMessage) => {
-    console.log('👍 Liked message:', msg.content);
-  };
-
-  const handleDislike = (msg: IChatMessage) => {
-    console.log('👎 Disliked message:', msg.content);
   };
 
   const startEdit = (msg: IChatMessage) => {
@@ -167,7 +167,7 @@ const SmartChatReport = () => {
       const requestBody = { chat: trimmedMessages };
       const response = await reportingApiService.getChat(requestBody);
 
-      let responseText = 'Sorry, no response from assistant.';
+      let responseText = 'Hmm… I couldn’t generate a good answer right now. You can try rephrasing or retrying.';
       let newSuggestions: string[] = [];
 
       if (response?.body) {
@@ -187,17 +187,47 @@ const SmartChatReport = () => {
 
       setSuggestions(newSuggestions);
 
-      const aiMessage: IChatMessageWithStatus = {
-        role: 'assistant',
-        content: responseText,
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-      };
+      const timestampAssistant = new Date().toISOString();
 
-      setTimeout(() => {
-        setChatMessages((prev) => [...prev, aiMessage]);
-        setIsTyping(false);
-      }, 500);
+      // Add empty assistant message to begin typing
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: '',
+          timestamp: timestampAssistant,
+          status: 'typing',
+        },
+      ]);
+
+      let index = 0;
+
+      const typingInterval = setInterval(() => {
+        index++;
+
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.timestamp === timestampAssistant
+              ? {
+                  ...msg,
+                  content: responseText.slice(0, index),
+                }
+              : msg
+          )
+        );
+
+        if (index >= responseText.length) {
+          clearInterval(typingInterval);
+          setChatMessages((prev) =>
+            prev.map((msg) =>
+              msg.timestamp === timestampAssistant
+                ? { ...msg, status: 'sent' }
+                : msg
+            )
+          );
+          setIsTyping(false);
+        }
+      }, 10); // Typing speed (ms per character)
     } catch (error) {
       logger.error('handleSend', error);
       setChatMessages((prev) =>
@@ -208,7 +238,6 @@ const SmartChatReport = () => {
         )
       );
       setIsTyping(false);
-      antdMessage.error('Sorry, something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -241,11 +270,13 @@ const SmartChatReport = () => {
       <Flex
         gap="middle"
         vertical
+        ref={chatContainerRef}  
         style={{
           flex: 1,
           overflowY: 'auto',
           paddingRight: 8,
-          paddingBottom: 120,
+          paddingBottom: 16, 
+          maxHeight: 'calc(100vh - 200px)',
         }}
       >
         {chatMessages.length > 0 ? (
@@ -278,9 +309,9 @@ const SmartChatReport = () => {
                     }}
                   >
                     <Button type="primary" onClick={saveEdit}>
-                      💾 Save
+                      Save
                     </Button>
-                    <Button onClick={cancelEdit}>❌ Cancel</Button>
+                    <Button onClick={cancelEdit}>Cancel</Button>
                   </div>
                 </>
               ) : (
@@ -311,34 +342,33 @@ const SmartChatReport = () => {
 
                   {msg.role === 'assistant' && (
                     <Flex
-                      justify="space-between"
+                      justify="flex-end"
                       style={{
                         marginTop: 8,
                         marginLeft: 12,
                         marginRight: 12,
                         fontSize: 16,
+                        cursor: 'pointer',
                       }}
                     >
-                      <Flex gap="middle" style={{ cursor: 'pointer' }}>
-                        <LikeOutlined title="Like" onClick={() => handleLike(msg)} />
-                        <DislikeOutlined
-                          title="Dislike"
-                          onClick={() => handleDislike(msg)}
-                        />
-                      </Flex>
                       <CopyOutlined
                         title="Copy"
-                        style={{ cursor: 'pointer' }}
                         onClick={() => handleCopy(msg.content)}
                       />
                     </Flex>
                   )}
+
                   {msg.role === 'user' && (
                     <Flex gap="small" style={{ marginTop: 8 }}>
                       <Button
                         size="small"
                         icon={<EditIcon />}
                         onClick={() => startEdit(msg)}
+                      />
+                      <Button
+                        size="small"
+                        icon={<CopyOutlined />}
+                        onClick={() => handleCopy(msg.content)}
                       />
                       <Button
                         size="small"
@@ -361,23 +391,23 @@ const SmartChatReport = () => {
         )}
 
         {suggestions.length > 0 && (
-  <div css={suggestionsBoxStyle}>
-    <Typography.Text css={suggestionsTitleStyle}>
-      Suggestions:
-    </Typography.Text>
-    <ul style={{ paddingLeft: '20px', margin: 0 }}>
-      {suggestions.map((suggestion, index) => (
-        <li
-          key={index}
-          css={suggestionItemStyle}
-          onClick={() => onSuggestionClick(suggestion)}
-        >
-          {suggestion}
-        </li>
-      ))}
-    </ul>
-  </div>
-)}
+          <div css={suggestionsBoxStyle}>
+            <Typography.Text css={suggestionsTitleStyle}>
+              Suggestions:
+            </Typography.Text>
+            <ul style={{ paddingLeft: '20px', margin: 0 }}>
+              {suggestions.map((suggestion, index) => (
+                <li
+                  key={index}
+                  css={suggestionItemStyle}
+                  onClick={() => onSuggestionClick(suggestion)}
+                >
+                  {suggestion}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {showPrompts && (
           <>
@@ -445,5 +475,5 @@ const SmartChatReport = () => {
 export default SmartChatReport;
 
 interface IChatMessageWithStatus extends IChatMessage {
-  status?: 'pending' | 'failed' | 'sent';
+  status?: 'pending' | 'failed' | 'sent' | 'typing';
 }
