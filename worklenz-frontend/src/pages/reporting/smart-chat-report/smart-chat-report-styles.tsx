@@ -1,46 +1,114 @@
-import React from "react";
-import { css } from '@emotion/react';
+import React from 'react';
+import { css, keyframes } from '@emotion/react';
 
-// Avatars
-export const fooAvatar: React.CSSProperties = {
-  color: '#f56a00',
-  backgroundColor: '#fde3cf',
-};
-
-export const barAvatar: React.CSSProperties = {
-  color: '#fff',
-  backgroundColor: '#87d068',
-};
-
-// Message action buttons
-export const messageActionsStyle = css`
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
+// Animation
+export const fadeIn = keyframes`
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 `;
 
-// Edit textarea
-export const editTextareaStyle = css`
+// Welcome Screen
+export const welcomeContainerStyle = css`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+`;
+
+// Fullscreen center layout for first screen
+export const fullScreenCenterWrapper = css`
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+`;
+
+// Input style when centered before chat starts
+export const fullScreenInputStyle = css`
+  margin-top: 24px;
   width: 100%;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 14px;
-  resize: vertical;
-  min-height: 60px;
-  background-color: var(--background-color);
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
+  max-width: 600px;
+  padding: 0 16px;
 `;
 
-// Edit buttons
-export const editButtonsContainer = css`
-  margin-top: 8px;
+// Layout
+export const containerStyle = css`
   display: flex;
-  gap: 12px;
-  justify-content: flex-end;
+  justify-content: center;
+  align-items: stretch;
+  height: 100vh;
+  background-color: var(--background-color, #fff);
+  color: var(--text-color, #000);
+  overflow: hidden;
 `;
 
-// Markdown table
+// Scrollable chat wrapper
+export const chatScrollableWrapper = css`
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 80px; /* space for sticky input */
+`;
+
+// Chat message container
+export const chatInnerContainer = css`
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+`;
+
+// Sticky input bar after chat starts
+export const stickyInputContainerStyle = css`
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background-color: var(--background-color, #fff);
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+  z-index: 20;
+`;
+
+export const stickyInputInner = css`
+  width: 100%;
+  max-width: 600px;
+`;
+
+// Message Bubbles
+export const bubbleUserStyle = css`
+  background-color: var(--user-bubble-bg, #e6f7ff);
+  color: var(--user-bubble-text, #0050b3);
+  padding: 12px 16px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  max-width: 85%;
+  align-self: flex-end;
+  animation: ${fadeIn} 0.3s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  word-break: break-word;
+`;
+
+export const bubbleAssistantStyle = css`
+  background: linear-gradient(145deg, var(--assistant-bubble-bg, #7e7a7a), #949191);
+  color: var(--assistant-bubble-text, #000);
+  padding: 12px 16px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  max-width: 85%;
+  align-self: flex-start;
+  animation: ${fadeIn} 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  word-break: break-word;
+`;
+
+// Markdown Tables
 export const markdownTableStyle = css`
   table {
     width: 100%;
@@ -61,79 +129,86 @@ export const markdownTableStyle = css`
   }
 `;
 
-// Chart container
-export const chartContainer = css`
-  padding: 1rem;
-  background-color: var(--chart-background);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  margin-top: 1rem;
-`;
-
-// Chat container: main background and text color
-export const containerStyle = css`
-  background-color: var(--background-color);
-  color: var(--text-color);
-  height: 100vh;
-  padding: 1rem;
-  overflow-y: auto;
-`;
-
-// User bubble
-export const bubbleUserStyle = css`
-  background-color: var(--user-bubble-bg);
-  color: var(--user-bubble-text);
-  padding: 12px;
-  border-radius: 16px;
-  margin-bottom: 8px;
-  max-width: 80%;
-`;
-
-// Assistant bubble
-export const bubbleAssistantStyle = css`
-  background-color: var(--assistant-bubble-bg);
-  color: var(--assistant-bubble-text);
-  padding: 12px;
-  border-radius: 16px;
-  margin-bottom: 8px;
-  max-width: 80%;
-`;
-
+// Suggestions
 export const suggestionsBoxStyle = css`
-  background-color: var(--suggestion-bg);
-  color: var(--suggestion-text);
-  padding: 16px;
-  border-radius: 12px;
-  margin-top: 12px;
-  max-width: 80%;
-  align-self: flex-start;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
 `;
 
 export const suggestionsTitleStyle = css`
   font-weight: bold;
   margin-bottom: 8px;
-  color: var(--suggestion-text);
+  width: 100%;
 `;
 
 export const suggestionItemStyle = css`
+  background-color: var(--suggestion-bg, #898585ff);
+  color: var(--suggestion-text, #333);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
   cursor: pointer;
-  color: var(--suggestion-link);
-  margin-bottom: 6px;
-  transition: color 0.2s;
+  user-select: none;
 
   &:hover {
-    color: var(--suggestion-link-hover);
+    background-color: var(--suggestion-hover-bg, #807a7aff);
   }
 `;
 
-// Sticky input container (for bottom input area)
-export const stickyInputContainerStyle = css`
-  position: sticky;
-  bottom: 0;
-  background-color: var(--background-color);
-  padding-top: 12px;
-  padding-bottom: 12px;
-  z-index: 10;
-  border-top: 1px solid var(--border-color);
+// Edit Area
+export const editTextareaStyle = css`
+  width: 100%;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 14px;
+  resize: vertical;
+  min-height: 60px;
+  background-color: var(--background-color, #fff);
+  color: var(--text-color, #000);
+  border: 1px solid var(--border-color, #ccc);
+`;
+
+export const editButtonsContainer = css`
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+`;
+
+// Chat Wrapper
+export const chatWrapper = css`
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+`;
+
+// Chat Content
+export const chatContentWrapper = css`
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+`;
+
+// Input area after chat starts
+export const inputAreaStyle = css`
+  width: 100%;
+  max-width: 800px;
+  padding: 12px;
+`;
+
+// Centered input before messages
+export const centeredInputWrapper = css`
+  flex: 1;
+  width: 100%;
+  max-width: 700px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
 `;
