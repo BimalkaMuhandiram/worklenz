@@ -3,6 +3,7 @@ import ReportingControllerBase from "../reporting/reporting-controller-base";
 import { OpenAIService } from "./openai-service";
 import { PromptBuilder } from "./prompt-builder";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { AppError } from "../../utils/AppError";
 
 type CachedSchema = {
   timestamp: number;
@@ -104,7 +105,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
           schema += result.rows.map((row) => row.table_schema_representation).join("\n") + "\n";
         }
       } catch (err) {
-        console.error(`Schema error (${table}):`, err);
+        console.error(`Schema error for table "${table}":`, err);
       }
     }
 
@@ -134,11 +135,18 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       .find((msg) => msg.role === "user")?.content;
 
     if (!lastUserMessage || typeof lastUserMessage !== "string") {
-      return { summary: "Could not extract user message.", data: [] };
+      return { summary: "No valid user message found.", data: [] };
+    }
+
+    let fullSchema: string;
+    try {
+      fullSchema = await this.createTableSchema();
+    } catch (err) {
+      console.error("Schema generation failed:", err);
+      throw new AppError("Failed to load schema. Please try again later.");
     }
 
     // Step 2: Get full schema, using cached version if possible
-    const fullSchema = await this.createTableSchema();
     const fullSchemaDescriptions = fullSchema
       .split("\n")
       .map((line) => line.trim())
@@ -163,7 +171,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       aiResponse = await OpenAIService.createChatCompletion(messages);
     } catch (err) {
       console.error("OpenAI chat completion error:", err);
-      return { summary: "AI service failed.", data: [] };
+      throw new AppError("AI service is currently unavailable.", 503);
     }
 
     // Clean AI response and parse JSON
@@ -173,7 +181,8 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     try {
       result = JSON.parse(cleaned);
     } catch {
-      return { summary: "Failed to parse AI response JSON.", data: [] };
+      console.error("Invalid AI JSON response:", cleaned);
+      throw new AppError("Unable to process the request. Please try again.");
     }
 
     // Step 6: Validate result object
@@ -190,14 +199,15 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
 
       // Consider limiting or summarizing results if large
 
-      return JSON.stringify({
+      return {
         summary: result.summary,
         data: dbResult.rows,
-      });
+      };
+
     } catch (err) {
       console.error("Database query error:", err);
       return {
-        summary: "Database query failed.",
+        summary: "We encountered an issue while trying to fetch data. Please try rephrasing your question.",
         data: [],
       };
     }
@@ -211,63 +221,90 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     // Build a prompt for the AI to create a human-readable response from query data
     messages.unshift(PromptBuilder.buildResponsePrompt({ items: dataList.data, teamId }));
 
-    // Optional: truncate messages if too long
-
-    return OpenAIService.createChatCompletion(messages);
+    try {
+      return await OpenAIService.createChatCompletion(messages);
+    } catch (err) {
+      console.error("Failed to generate chat completion with data:", err);
+      throw new AppError("AI failed to respond to data. Please try again.", 500);
+    }
   }
 
   protected static async getSQLQueryFromMessage({
-    userMessage,
-    userId,
-    teamId,
-    schema,
-  }: {
-    userMessage: string;
-    userId: string;
-    teamId: string;
-    schema: string;
-  }) {
-    const prompt = PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
+  userMessage,
+  userId,
+  teamId,
+  schema,
+}: {
+  userMessage: string;
+  userId: string;
+  teamId: string;
+  schema: string;
+}) {
+  const prompt = PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
 
-    const systemInstruction: ChatCompletionMessageParam = {
+  const systemInstruction: ChatCompletionMessageParam = {
       role: "system",
       content: `You must only generate SQL queries that restrict results to team_id = '${teamId}'. Never expose data from other teams.`,
-    };
+  };
 
-    let res;
-    try {
-      res = await OpenAIService.createChatCompletion([systemInstruction, prompt]);
-    } catch (err) {
-      console.error("OpenAI service error:", err);
-      return null;
-    }
-
-    try {
-      const content = res?.content?.replace(/```json|```/g, "").trim() || "{}";
-      return JSON.parse(content);
-    } catch (err) {
-      console.error("Failed to parse SQL query from AI response:", err);
-      return null;
-    }
+  let res;
+  try {
+    res = await OpenAIService.createChatCompletion([systemInstruction, prompt]);
+  } catch (err) {
+    console.error("OpenAI service error:", err);
+    throw new AppError("AI service is currently unavailable. Please try again later.", 503);
   }
+
+  try {
+  let content = res?.content;
+  if (Buffer.isBuffer(content)) content = content.toString("utf-8");
+  if (typeof content !== "string") content = String(content);
+
+  let cleaned = content.replace(/```json|```/g, "").trim();
+
+  cleaned = cleaned.replace(/\\\s*\n/g, " ");
+
+  cleaned = cleaned.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+
+  return JSON.parse(cleaned || "{}");
+} catch (err) {
+  console.error("Failed to parse SQL query from AI response:", err, res?.content);
+  throw new AppError("Unable to understand the request. Please try rephrasing your message.", 400);
+}
+}
 
   protected static async getAnswerFromQueryResult({
+  userMessage,
+  result,
+}: {
+  userMessage: string;
+  result: any[];
+}) {
+  const prompt = PromptBuilder.buildAnswerFromResultsPrompt({
     userMessage,
-    result,
-  }: {
-    userMessage: string;
-    result: any[];
-  }) {
-    const prompt = PromptBuilder.buildAnswerFromResultsPrompt({
-      userMessage,
-      queryResult: result,
-    });
+    queryResult: result,
+  });
 
-    try {
-      return await OpenAIService.createChatCompletion([prompt]);
-    } catch (err) {
-      console.error("OpenAI answer generation error:", err);
-      return null;
-    }
+  // System instruction to improve tone and clarity
+  const systemPrompt: ChatCompletionMessageParam = {
+    role: "system",
+    content:
+    "You are a helpful assistant. Answer user questions naturally and clearly based on the data provided. Do not mention SQL queries, databases, or any internal processing. Just give a clear and direct answer.",
+  };
+
+  try {
+    const res = await OpenAIService.createChatCompletion([systemPrompt, prompt]);
+
+    let content = res?.content;
+    if (Buffer.isBuffer(content)) content = content.toString("utf-8");
+    if (typeof content !== "string") content = String(content);
+
+    return {
+      content: content.trim(),
+    };
+  } catch (err) {
+    console.error("OpenAI answer generation error:", err);
+    throw new AppError("Unable to generate a response. Please try again later.", 500);
   }
+}
 }

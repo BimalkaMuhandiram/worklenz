@@ -223,13 +223,13 @@ const SmartChatReport: React.FC = () => {
           vertical
           align="center"
           justify="center"
-          style={{ height: '100%', width: '100%' }}
+          style={{ height: '70%', width: '100%' }}
         >
           <Welcome
             variant="borderless"
             icon={<img src={welcomeScreenIcon} alt="Assistant" width={55} height={55} />}
             title="Hello, how can I help you?"
-            description="I can generate summary reports and insights from your data."
+            description="I can generate summary reports and insights from your data. "
           />
           <Prompts items={firstScreenPrompts} onItemClick={onPromptsItemClick} />
           <div css={centeredInputWrapper}>

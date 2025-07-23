@@ -96,7 +96,7 @@ export const bubbleUserStyle = css`
 `;
 
 export const bubbleAssistantStyle = css`
-  background: linear-gradient(145deg, var(--assistant-bubble-bg, #7e7a7a), #949191);
+  background: linear-gradient(145deg, var(--assistant-bubble-bg, #7e7a7a), #949191); /* background: var(--assistant-bubble-bg, #4a90e2); */
   color: var(--assistant-bubble-text, #000);
   padding: 12px 16px;
   border-radius: 20px;
@@ -133,13 +133,13 @@ export const markdownTableStyle = css`
 export const suggestionsBoxStyle = css`
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 10px;
+  margin: 24px 0 12px 0;
 `;
 
 export const suggestionsTitleStyle = css`
   font-weight: bold;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   width: 100%;
 `;
 
@@ -151,6 +151,7 @@ export const suggestionItemStyle = css`
   font-size: 13px;
   cursor: pointer;
   user-select: none;
+  margin: 4px;
 
   &:hover {
     background-color: var(--suggestion-hover-bg, #807a7aff);
