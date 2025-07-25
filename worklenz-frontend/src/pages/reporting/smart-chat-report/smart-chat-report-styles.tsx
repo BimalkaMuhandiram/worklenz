@@ -83,28 +83,29 @@ export const stickyInputInner = css`
 
 // Message Bubbles
 export const bubbleUserStyle = css`
-  background-color: var(--user-bubble-bg, #e6f7ff);
-  color: var(--user-bubble-text, #0050b3);
-  padding: 12px 16px;
-  border-radius: 20px;
+  background-color: transparent;
+  color: var(--user-bubble-text, #000);
+  padding: 0 16px;
+  border-radius: 0;
   margin-bottom: 8px;
-  max-width: 85%;
+  max-width: 100%;
   align-self: flex-end;
   animation: ${fadeIn} 0.3s ease;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  box-shadow: none;
   word-break: break-word;
 `;
 
 export const bubbleAssistantStyle = css`
-  background: linear-gradient(145deg, var(--assistant-bubble-bg, #7e7a7a), #949191); /* background: var(--assistant-bubble-bg, #4a90e2); */
-  color: var(--assistant-bubble-text, #000);
-  padding: 12px 16px;
-  border-radius: 20px;
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
   margin-bottom: 8px;
-  max-width: 85%;
+  max-width: 100%;
   align-self: flex-start;
   animation: ${fadeIn} 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  color: var(--assistant-bubble-text, #000);
   word-break: break-word;
 `;
 

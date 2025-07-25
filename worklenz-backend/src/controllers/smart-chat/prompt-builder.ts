@@ -112,7 +112,7 @@ ${JSON.stringify(data, null, 2)}
 ## Format
 - Use markdown formatting.
 - Use \`backticks\` for task names, people, and dates.
-- Never expose raw JSON or internal IDs.
+- **Never expose raw JSON or internal IDs such as user IDs, team IDs, or task IDs.**
 - If unsure, ask clarifying questions before answering.
 
 ## WARNING
@@ -231,6 +231,8 @@ If the user query is complex or multi-part, break down the response into clear s
 You are a SQL assistant. Translate natural language into a valid PostgreSQL SELECT query using the schema below.
 
 ## WARNING
+- NEVER include any IDs (user IDs, team IDs, task IDs) in your response.
+- Use names only (e.g., user full names, project names, task names).
 - ONLY use tables and columns explicitly listed in the schema below.
 - Do NOT guess or make up table names or column names.
 - If a column or table is missing, ask for clarification.
@@ -273,26 +275,46 @@ ${JSON.stringify(schema, null, 2)}
 - Limit result rows to 100.
 - Avoid subqueries unless necessary.
 
-Natural language: "${userMessage}"
+## Natural Language User Request
+"${userMessage}"
+
+## Clarify If Needed
+If the task is unclear or ambiguous (e.g., missing assignee, project, or status), ask for clarification instead of guessing.
+
+If you understand the task, proceed to generate a query and summary.
+
     `.trim(),
   };
 }
 
   // Convert SQL result to human-readable summary with enhancements
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
-    const { items, teamId } = data;
-    const filteredItems = Array.isArray(items)
-      ? items.filter(item => String(item.team_id) === String(teamId))
-      : [];
+  const { items, teamId } = data;
 
-    return {
-      role: "system",
-      content: `
+  const filteredItems = Array.isArray(items) ? items.filter(item => String(item.team_id) === String(teamId)) : [];
+
+  const sanitizedItems = filteredItems.map(item => {
+    const copy = { ...item };
+    delete copy.owner_id;
+    delete copy.status_id;
+    delete copy.team_id;
+    delete copy.id;
+    return copy;
+  });
+
+  const timestamp = new Date().toISOString();
+
+  return {
+    role: "system",
+    content: `
 You are a project assistant. Use the provided data to answer the user's question.
+
+## Generated At
+\`${timestamp}\`
 
 ## Data
 \`\`\`json
-${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
+${JSON.stringify(sanitizedItems.slice(0, 10), null, 2)}
 \`\`\`
 
 ## Instructions
@@ -303,9 +325,9 @@ ${JSON.stringify(filteredItems.slice(0, 10), null, 2)}
 - Use \`backticks\` for names and dates.
 
 If the list is empty, say "No data found".
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
 
   // few-shot examples with more diverse queries
   static buildFewShotPrompt(
@@ -314,39 +336,47 @@ If the list is empty, say "No data found".
   ): ChatCompletionMessageParam {
     if (examples.length === 0) {
       examples = [
-        {
-          user: "Show me all tasks assigned to John in project Alpha.",
-          assistant: `{
+  {
+    user: "Show me all tasks assigned to John in project Alpha.",
+    assistant: `{
   "summary": "Tasks assigned to John in project Alpha",
-  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.assignee = 'John' AND p.name = 'Alpha' AND p.team_id = '...' LIMIT 100",
+  "query": "SELECT t.id, t.name AS task_name, t.due_date, u.name AS assignee_name, p.name AS project_name FROM tasks t JOIN users u ON t.assignee = u.id JOIN projects p ON t.project_id = p.id WHERE u.name = 'John' AND p.name = 'Alpha' AND p.team_id = '...' LIMIT 100",
   "is_query": true
-}`,
-        },
-        {
-          user: "List overdue tasks.",
-          assistant: `{
-  "summary": "Overdue tasks",
-  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.due_date < CURRENT_DATE AND p.team_id = '...' LIMIT 100",
+}`
+  },
+  {
+    user: "List tasks due this week assigned to John for project Beta.",
+    assistant: `{
+  "summary": "Tasks due this week assigned to John in project Beta",
+  "query": "SELECT t.id, t.name AS task_name, t.due_date, u.name AS assignee_name, p.name AS project_name FROM tasks t JOIN users u ON t.assignee = u.id JOIN projects p ON t.project_id = p.id WHERE u.name = 'John' AND p.name = 'Beta' AND t.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND p.team_id = '...' LIMIT 100",
   "is_query": true
-}`,
-        },
-        {
-          user: "What tasks were completed last week?",
-          assistant: `{
+}`
+  },
+  {
+    user: "What tasks were completed last week?",
+    assistant: `{
   "summary": "Tasks completed last week",
-  "query": "SELECT t.* FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.completed_date BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE AND p.team_id = '...' LIMIT 100",
+  "query": "SELECT t.id, t.name AS task_name, t.completed_date, p.name AS project_name FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.completed_date BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE AND p.team_id = '...' LIMIT 100",
   "is_query": true
-}`,
-        },
-        {
-          user: "Create a new task 'Prepare presentation' assigned to Alice.",
-          assistant: `{
-  "summary": "Create task 'Prepare presentation' assigned to Alice",
-  "query": "INSERT INTO tasks (name, assignee, project_id) VALUES ('Prepare presentation', 'Alice', (SELECT id FROM projects WHERE name = '...' LIMIT 1))",
-  "is_query": false
-}`,
-        },
-      ];
+}`
+  },
+  {
+    user: "What tasks are overdue?",
+    assistant: `{
+  "summary": "Overdue tasks for the team",
+  "query": "SELECT t.id, t.name AS task_name, t.due_date, p.name AS project_name FROM tasks t JOIN projects p ON t.project_id = p.id WHERE t.due_date < CURRENT_DATE AND t.status != 'completed' AND p.team_id = '...' LIMIT 100",
+  "is_query": true
+}`
+  },
+  {
+    user: "Tasks assigned to Emily for this week",
+    assistant: `{
+  "summary": "Emily's tasks due this week",
+  "query": "SELECT t.id, t.name AS task_name, t.due_date, u.name AS assignee_name, p.name AS project_name FROM tasks t JOIN users u ON t.assignee = u.id JOIN projects p ON t.project_id = p.id WHERE u.name = 'Emily' AND t.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND p.team_id = '...' LIMIT 100",
+  "is_query": true
+}`
+  }
+];
     }
 
     const fewShotText = examples
@@ -362,14 +392,26 @@ ${ex.assistant}
     return {
       role: "system",
       content: `
-You will receive a user query. Translate it into a SQL SELECT query filtered by team_id.
+You are an AI that converts user queries into SQL SELECT statements related to tasks, users, and projects in a project management system.
+
+Use this database schema:
+- tasks(id, name, assignee_id, due_date, completed_date, status, project_id)
+- users(id, name)
+- projects(id, name, team_id)
+
+Rules:
+- Every SQL query must include "p.team_id = '...'" in the WHERE clause. Do not skip this.
+- When filtering by assignee, use u.name = 'John' (not ID).
+- Assume user-provided names are stored in users.name.
+- Use correct JOINs to connect tasks, users, and projects.
+- Return only a JSON response with: summary, query, and is_query = true/false
 
 ## Examples
 ${fewShotText}
 
 Now convert the following user query:
 "${data.userMessage}"
-      `.trim(),
+`.trim()
     };
   }
 

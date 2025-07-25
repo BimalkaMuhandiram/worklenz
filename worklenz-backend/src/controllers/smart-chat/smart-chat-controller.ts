@@ -76,17 +76,43 @@ public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): 
 
   const { chat: messages } = validation.data;
   const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) {
+  throw new AppError("No messages provided.", 400);
+  } 
   const userMessage =
     typeof lastMessage.content === "string"
       ? lastMessage.content
       : lastMessage.content.map((c) => c.text).join(" ");
 
+  // Step 1: Classify intent
+  const intent = await OpenAIService.classifyUserIntent(userMessage);
+  console.log(`User intent classified as: ${intent}`);
+
+  if (intent !== "data_query") {
+    const fallback = {
+      chit_chat: "I'm here to assist with project data. Try asking about tasks, team members, or deadlines.",
+      general_request: "Try asking about tasks, projects, or your team. For example: 'Show all tasks assigned to John'.",
+      unknown: "I couldn't understand that clearly. Please ask something about your tasks, projects, or team.",
+
+  } as const;
+
+const validKeys = Object.keys(fallback);
+const key = validKeys.includes(intent) ? intent : "unknown";
+
+return res.status(200).json(new ServerResponse(true, {
+  answer: fallback[key as keyof typeof fallback],
+  suggestions: ["Show overdue tasks", "List my team", "Project status update"]
+}));
+
+  }
+
+  // Step 2: Get schema
   const schema = this.getTableSchema();
   if (!schema) {
     throw new AppError("No schema available.", 400);
   }
 
-  // STEP 1: Generate SQL
+  // Step 3: Generate SQL from message
   const queryResponseObj = await this.getSQLQueryFromMessage({
     userMessage,
     userId,
@@ -97,15 +123,19 @@ public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): 
   if (
     !queryResponseObj ||
     typeof queryResponseObj.query !== "string" ||
-    queryResponseObj.query.trim() === ""
+    queryResponseObj.query.trim() === "" ||
+    queryResponseObj.is_query === false
   ) {
-    throw new AppError("Sorry, I couldn’t understand your request.", 400);
+    return res.status(200).json(new ServerResponse(true, {
+      answer: queryResponseObj?.summary || "Sorry, I couldn’t understand your request.",
+      suggestions: ["Try asking about tasks, projects, or team members"]
+    }));
   }
 
   let sqlQuery = queryResponseObj.query.trim();
   console.log("Generated SQL Query:", sqlQuery);
 
-  // STEP 2: Enforce team_id filter
+  // Step 4: Inject team_id filter
   const lowerQuery = sqlQuery.toLowerCase();
   if (!/where\s+.*team_id\s*=/.test(lowerQuery)) {
     if (/select\s+/.test(lowerQuery) && /from\s+/.test(lowerQuery)) {
@@ -116,7 +146,7 @@ public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): 
     }
   }
 
-  // STEP 3: Execute SQL
+  // Step 5: Execute SQL
   let dbResult;
   try {
     const queryResult = await db.query(sqlQuery);
@@ -130,17 +160,18 @@ public static async getChatInfo(req: IWorkLenzRequest, res: IWorkLenzResponse): 
     throw new AppError("Something went wrong while querying the data.", 500);
   }
 
-  // STEP 4: AI Answer
+  // Step 6: AI Answer
   const answer = await this.getAnswerFromQueryResult({ userMessage, result: dbResult });
   const assistantContent = answer?.content ?? "";
 
-  // STEP 5: Follow-up suggestions
+  // Step 7: Follow-up suggestions
   const suggestions = await OpenAIService.generateFollowUpSuggestions(userMessage, assistantContent);
 
-  // STEP 6: Success response
+  // Step 8: Return final response
   return res.status(200).json(new ServerResponse(true, {
     answer: assistantContent,
     suggestions,
   }));
 }
+
 }

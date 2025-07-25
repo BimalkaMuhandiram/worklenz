@@ -61,7 +61,6 @@ const SmartChatReport: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef(0);
 
-  // Auto scroll on new messages
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container) return;
@@ -69,13 +68,11 @@ const SmartChatReport: React.FC = () => {
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [chatMessages.map(m => m.content).join('')]);
 
-  // Copy text to clipboard
   const handleCopy = (text: string) => {
     copy(text);
     antdMessage.success('Copied to clipboard!');
   };
 
-  // Editing handlers
   const startEdit = (msg: IChatMessage) => {
     setEditingMessageId(msg.timestamp);
     setEditingContent(msg.content);
@@ -116,7 +113,6 @@ const SmartChatReport: React.FC = () => {
     handleSend(text);
   };
 
-  // Send message handler
   const handleSend = async (inputMessage: string, isRetry = false) => {
     if (!inputMessage.trim() || loading) return;
 
@@ -179,7 +175,7 @@ const SmartChatReport: React.FC = () => {
           );
           setIsTyping(false);
         }
-      }, 10); 
+      }, 10);
     } catch (err) {
       logger.error('handleSend', err);
       setChatMessages((prev) =>
@@ -195,7 +191,6 @@ const SmartChatReport: React.FC = () => {
     }
   };
 
-  // Retry sending a failed message
   const retrySend = (msg: IChatMessageWithStatus) => {
     setChatMessages((prev) =>
       prev.map((m) =>
@@ -205,7 +200,6 @@ const SmartChatReport: React.FC = () => {
     handleSend(msg.content, true);
   };
 
-  // Markdown renderer for assistant messages
   const md = Markdownit({ html: false, breaks: true });
   const renderAssistantMessage: BubbleProps['messageRender'] = (content) => (
     <Typography>
@@ -215,6 +209,12 @@ const SmartChatReport: React.FC = () => {
       />
     </Typography>
   );
+
+  const messageWrapperStyle = (role: string) => css`
+    display: flex;
+    justify-content: ${role === 'user' ? 'flex-end' : 'flex-start'};
+    margin-bottom: 12px;
+  `;
 
   return (
     <Flex vertical css={containerStyle}>
@@ -244,11 +244,12 @@ const SmartChatReport: React.FC = () => {
         </Flex>
       ) : (
         <>
-          <div css={chatWrapper} ref={chatContainerRef}>
-            <div css={chatContentWrapper}>
-              <Flex vertical gap="middle">
-                {chatMessages.map((msg) => (
-                  <div key={msg.timestamp}>
+        <div css={chatWrapper} ref={chatContainerRef}>
+          <div css={chatContentWrapper}>
+            <Flex vertical gap="middle">
+              {chatMessages.map((msg) => (
+                <div key={msg.timestamp} css={messageWrapperStyle(msg.role)}>
+                  <div>
                     {editingMessageId === msg.timestamp && msg.role === 'user' ? (
                       <>
                         <textarea
@@ -258,7 +259,9 @@ const SmartChatReport: React.FC = () => {
                           onChange={(e) => setEditingContent(e.target.value)}
                         />
                         <div css={editButtonsContainer}>
-                          <Button type="primary" onClick={saveEdit}>Save</Button>
+                          <Button type="primary" onClick={saveEdit}>
+                            Save
+                          </Button>
                           <Button onClick={cancelEdit}>Cancel</Button>
                         </div>
                       </>
@@ -269,20 +272,10 @@ const SmartChatReport: React.FC = () => {
                           content={msg.content}
                           messageRender={msg.role === 'assistant' ? renderAssistantMessage : undefined}
                           css={msg.role === 'user' ? bubbleUserStyle : bubbleAssistantStyle}
+                          variant={msg.role === 'assistant' ? 'borderless' : undefined}
                         />
-                        {msg.status === 'failed' && msg.role === 'user' && (
-                          <Button
-                            danger
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            onClick={() => retrySend(msg)}
-                            style={{ marginTop: 4 }}
-                          >
-                            Retry
-                          </Button>
-                        )}
                         {msg.role === 'assistant' && (
-                          <Flex justify="flex-end" style={{ marginTop: 8 }}>
+                          <Flex justify="flex-start" style={{ marginTop: 6 }}>
                             <CopyOutlined
                               style={{ cursor: 'pointer' }}
                               onClick={() => handleCopy(msg.content)}
@@ -290,8 +283,9 @@ const SmartChatReport: React.FC = () => {
                             />
                           </Flex>
                         )}
-                        {msg.role === 'user' && (
-                          <Flex gap="small" style={{ marginTop: 8 }}>
+
+                        {msg.role === 'user' && editingMessageId !== msg.timestamp && (
+                          <Flex justify="flex-end" gap="small" style={{ marginTop: 6 }}>
                             <Button
                               size="small"
                               icon={<EditOutlined />}
@@ -304,40 +298,26 @@ const SmartChatReport: React.FC = () => {
                               onClick={() => handleCopy(msg.content)}
                               title="Copy message"
                             />
-                            <Button
-                              size="small"
-                              icon={<DeleteOutlined />}
-                              danger
-                              onClick={() => deleteMessage(msg.timestamp)}
-                              title="Delete message"
-                            />
                           </Flex>
                         )}
                       </>
                     )}
                   </div>
+                  {msg.status === 'failed' && msg.role === 'user' && (
+                    <Button
+                        danger
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => retrySend(msg)}
+                        style={{ marginTop: 4 }}
+                      >
+                        Retry
+                    </Button>
+                  )}
+                  </div>
                 ))}
                 {isTyping && (
                   <Bubble role="assistant" typing={{ step: 1, interval: 40 }} content="..." />
-                )}
-                {suggestions.length > 0 && (
-                  <div css={suggestionsBoxStyle}>
-                    <Typography.Text css={suggestionsTitleStyle}>Suggestions:</Typography.Text>
-                    <ul style={{ paddingLeft: 20, margin: 0 }}>
-                      {suggestions.map((s, i) => (
-                        <li
-                          key={i}
-                          css={suggestionItemStyle}
-                          onClick={() => handleSend(s)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if(e.key === 'Enter') handleSend(s); }}
-                        >
-                          {s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
                 )}
               </Flex>
             </div>
@@ -345,6 +325,26 @@ const SmartChatReport: React.FC = () => {
 
           <Flex vertical align="center" css={stickyInputContainerStyle}>
             <div css={inputAreaStyle}>
+              {suggestions.length > 0 && (
+                <div css={suggestionsBoxStyle}>
+                  <Typography.Text css={suggestionsTitleStyle}></Typography.Text>
+                  <ul style={{ paddingLeft: 100, margin: 20 }}>
+                    {suggestions.map((s, i) => (
+                      <li
+                        key={i}
+                        css={suggestionItemStyle}
+                        onClick={() => handleSend(s)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if(e.key === 'Enter') handleSend(s); }}
+                      >
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {chatMessages.length < 3 && (
                 <Prompts
                   styles={{ item: { borderRadius: 50 } }}

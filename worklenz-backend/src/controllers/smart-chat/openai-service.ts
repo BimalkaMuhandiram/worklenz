@@ -249,6 +249,51 @@ Suggest 2 natural and helpful follow-up questions the user might ask next:
     }
   }
 
+  public static async classifyUserIntent(userMessage: string): Promise<string> {
+  const prompt = `
+Classify the user's message intent into one of these categories:
+- data_query
+- chit_chat
+- help
+- other
+
+Use the following examples:
+- "What tasks are due this week?" → data_query
+- "List all tasks assigned to me" → data_query
+- "What's the weather?" → chit_chat
+- "How do I use this?" → help
+
+Message:
+"""${userMessage}"""
+
+Only return: data_query, chit_chat, help, or other.
+`;
+
+  try {
+    const completion = await this.client.chat.completions.create({
+      model: this.MODEL,
+      messages: [
+        { role: "system", content: "You are an intent classifier." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 10,
+    });
+
+    const messageContent = completion.choices[0].message?.content;
+
+    const content = messageContent ? messageContent.trim().toLowerCase() : "";
+
+    if (["data_query", "chit_chat", "help", "other"].includes(content)) {
+      return content;
+    }
+    return "other";
+  } catch (err) {
+    console.error("Error classifying user intent:", err);
+    return "other";
+  }
+}
+
   // Get embedding vector for a single text, using updated embedding model
   public static async getEmbedding(text: string): Promise<number[]> {
     const response = await this.client.embeddings.create({

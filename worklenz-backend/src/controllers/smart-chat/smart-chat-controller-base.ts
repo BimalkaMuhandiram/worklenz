@@ -20,9 +20,16 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
   }
 
   protected static getSystemPrompt(data: any) {
-    // Consider enriching system prompt dynamically based on user/team/project context
-    return PromptBuilder.buildSystemPrompt(data);
-  }
+  const context = {
+    userId: data?.userId,
+    teamId: data?.teamId,
+    projectName: data?.projectName,
+    role: data?.role,
+    purpose: "Assist with project-related queries using company data.",
+  };
+
+  return PromptBuilder.buildSystemPrompt(context);
+}
 
   protected static async getTeamData(teamId: string) {
     const q = `
@@ -152,6 +159,10 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       .map((line) => line.trim())
       .filter(Boolean);
 
+    if (!fullSchemaDescriptions.length) {
+      throw new AppError("Schema could not be loaded. Please try again later.", 500);
+    }
+
     // Step 3: Build query prompt with schema and context
     const queryPrompt = await PromptBuilder.buildQueryPrompt(
       schema,
@@ -175,7 +186,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
 
     // Clean AI response and parse JSON
-    const cleaned = aiResponse?.content?.replace(/```json|```/g, "").trim() || "{}";
+    const cleaned = aiResponse?.content?.replace(/```(json)?|\\n|\\r/g, "").trim() || "{}";
 
     let result: any;
     try {
@@ -186,7 +197,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
 
     // Step 6: Validate result object
-    if (!result?.is_query || typeof result.query !== "string" || !result.query.includes(teamId)) {
+    if (!result?.is_query || typeof result.query !== "string" || !/team_id\s*=\s*['"]?${teamId}['"]?/i.test(result.query)) {
       return {
         summary: result?.summary || "Invalid or unsafe query generated.",
         data: [],
