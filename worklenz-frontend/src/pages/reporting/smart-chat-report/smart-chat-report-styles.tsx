@@ -71,7 +71,7 @@ export const stickyInputContainerStyle = css`
   background-color: var(--background-color, #fff);
   display: flex;
   justify-content: center;
-  padding: 12px 16px;
+  padding: 8px 12px;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
   z-index: 20;
 `;
@@ -162,8 +162,9 @@ export const suggestionItemStyle = css`
 // Edit Area
 export const editTextareaStyle = css`
   width: 100%;
+  max-width: 1000px;
   border-radius: 8px;
-  padding: 8px;
+  padding: 12px;
   font-size: 14px;
   resize: vertical;
   min-height: 60px;
@@ -183,17 +184,16 @@ export const editButtonsContainer = css`
 export const chatWrapper = css`
   flex: 1;
   overflow-y: auto;
-  display: flex;
-  justify-content: center;
+  display: block; /* no justify-content center */
+  padding-bottom: 200px; /* space for sticky input */
 `;
 
-// Chat Content
 export const chatContentWrapper = css`
   width: 100%;
-  max-width: 900px;
+  max-width: 1100px;
+  margin: 0 auto; /* center horizontally */
   display: flex;
   flex-direction: column;
-  flex: 1;
 `;
 
 // Input area after chat starts

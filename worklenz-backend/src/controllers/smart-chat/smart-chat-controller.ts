@@ -9,32 +9,20 @@ import { OpenAIService } from "./openai-service";
 import { AppError } from "../../utils/AppError";
 
 function injectTeamIdFilter(sqlQuery: string, teamId: string): string {
-  // Check if query joins the "projects" table with alias (e.g., "projects p")
-  const projectAliasMatch = /join\s+projects\s+(\w+)/i.exec(sqlQuery) || /from\s+projects\s+(\w+)/i.exec(sqlQuery);
-  const alias = projectAliasMatch ? projectAliasMatch[1] : null;
+  const projectAliasMatch =
+    /join\s+projects\s+(\w+)/i.exec(sqlQuery) || /from\s+projects\s+(\w+)/i.exec(sqlQuery);
+  const alias = projectAliasMatch ? projectAliasMatch[1] : "projects"; // fallback to 'projects'
 
-  if (!alias) {
-    console.warn("No 'projects' table alias found. Skipping team_id injection.");
-    return sqlQuery;
-  }
+  const teamFilter = `${alias}.team_id = '${teamId}'`;
 
-  // Inject team_id condition safely
-  if (/where\s+/i.test(sqlQuery)) {
-    return sqlQuery.replace(/where\s+/i, (match) => `${match} ${alias}.team_id = '${teamId}' AND `);
+  // Inject team_id filter into WHERE clause
+  const whereMatch = sqlQuery.match(/where\s+/i);
+  if (whereMatch) {
+    // Insert after "WHERE " and preserve the rest of the condition
+    return sqlQuery.replace(/where\s+/i, `WHERE ${teamFilter} AND `);
   } else {
-    // No WHERE clause: inject new one after FROM clause
-    const fromEndIndex = sqlQuery.toLowerCase().indexOf("from") + 4;
-    const afterFromMatch = /from\s+[\w.]+\s+\w+/i.exec(sqlQuery);
-    if (afterFromMatch) {
-      const insertPos = afterFromMatch.index + afterFromMatch[0].length;
-      return (
-        sqlQuery.slice(0, insertPos) +
-        ` WHERE ${alias}.team_id = '${teamId}'` +
-        sqlQuery.slice(insertPos)
-      );
-    } else {
-      return sqlQuery + ` WHERE ${alias}.team_id = '${teamId}'`;
-    }
+    // No WHERE clause: inject it at the right place
+    return `${sqlQuery} WHERE ${teamFilter}`;
   }
 }
 
@@ -148,6 +136,19 @@ return res.status(200).json(new ServerResponse(true, {
 
   // Step 5: Execute SQL
   let dbResult;
+
+const teamIdRegex = new RegExp(`\\b\\w*\\.team_id\\s*=\\s*['"]?${teamId}['"]?`, 'i');
+
+if (!teamIdRegex.test(sqlQuery)) {
+  console.warn("Blocked unscoped query attempt:", sqlQuery);
+  throw new AppError("Unauthorized SQL query — missing team scope.", 403);
+}
+
+// Prevent potentially dangerous queries
+if (/drop|alter|insert|update|delete/i.test(sqlQuery)) {
+  console.warn("Blocked unsafe query attempt:", sqlQuery);
+  throw new AppError("Unsafe or unsupported SQL operation.", 400);
+}
   try {
     const queryResult = await db.query(sqlQuery);
     dbResult = queryResult.rows;

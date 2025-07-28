@@ -59,14 +59,35 @@ const SmartChatReport: React.FC = () => {
   );
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const scrollToBottom = () => {
+    const container = chatContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  };
   const prevMessagesLengthRef = useRef(0);
 
   useEffect(() => {
-    const container = chatContainerRef.current;
-    if (!container) return;
+  const container = chatContainerRef.current;
+  if (!container) return;
 
-    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-  }, [chatMessages.map(m => m.content).join('')]);
+  const scrollTimeout = setTimeout(() => {
+    container.scrollTop = container.scrollHeight;
+  }, 50);
+
+  return () => clearTimeout(scrollTimeout);
+}, [chatMessages.map(m => m.content).join('')]); 
+
+  useEffect(() => {
+  return () => {
+    if (typingIntervalRef.current) {
+      clearInterval(typingIntervalRef.current);
+    }
+  };
+  }, []);
 
   const handleCopy = (text: string) => {
     copy(text);
@@ -113,83 +134,120 @@ const SmartChatReport: React.FC = () => {
     handleSend(text);
   };
 
-  const handleSend = async (inputMessage: string, isRetry = false) => {
-    if (!inputMessage.trim() || loading) return;
+  const typingIndexRef = useRef(0);
 
-    const timestamp = new Date().toISOString();
+const handleSend = async (inputMessage: string, isRetry = false) => {
+  if (!inputMessage.trim() || loading) return;
 
-    if (!isRetry) {
-      setChatMessages((prev) => [
+  setLoading(true);
+  setMessageInput('');
+  setIsTyping(true);
+
+  try {
+    // Step 1: Add user message
+    let updatedMessages: IChatMessageWithStatus[] = [];
+    setChatMessages((prev) => {
+      updatedMessages = [
         ...prev,
-        { role: 'user', content: inputMessage, timestamp, status: 'pending' },
-      ]);
-    }
+        {
+          role: 'user',
+          content: inputMessage,
+          timestamp: new Date().toISOString(),
+          status: 'pending',
+        },
+      ];
+      return updatedMessages;
+    });
 
-    const trimmedMessages = [...chatMessages, { role: 'user', content: inputMessage }]
+    await new Promise((r) => setTimeout(r, 0)); // let state update
+
+    // Step 2: Prepare request
+    const trimmedMessages = updatedMessages
       .slice(-20)
       .map(({ role, content }) => ({ role, content }));
 
-    setLoading(true);
-    setMessageInput('');
-    setIsTyping(true);
+    // Step 3: Call API
+    const response = await reportingApiService.getChat({ chat: trimmedMessages });
+    const answer = response?.body?.answer || 'Unable to generate a response.';
+    const newSuggestions = response?.body?.suggestions || [];
 
-    try {
-      const response = await reportingApiService.getChat({ chat: trimmedMessages });
-      const answer = response?.body?.answer || 'Unable to generate a response.';
-      const newSuggestions = response?.body?.suggestions || [];
+    // Step 4: Mark user message as sent
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.content === inputMessage &&
+        msg.status === 'pending' &&
+        msg.role === 'user'
+          ? { ...msg, status: 'sent' }
+          : msg
+      )
+    );
 
-      if (!isRetry) {
+    setSuggestions(newSuggestions);
+
+    // Step 5: Add assistant "typing" message
+    const assistantTimestamp = new Date().toISOString();
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        role: 'assistant',
+        content: '',
+        timestamp: assistantTimestamp,
+        status: 'typing',
+      },
+    ]);
+
+    scrollToBottom();
+
+    // Step 6: Typing animation with ref for index
+    typingIndexRef.current = 0;
+    if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
+
+    typingIntervalRef.current = setInterval(() => {
+      typingIndexRef.current++;
+
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.timestamp === assistantTimestamp
+            ? {
+                ...msg,
+                content: answer.slice(0, typingIndexRef.current),
+              }
+            : msg
+        )
+      );
+
+      scrollToBottom();
+
+      if (typingIndexRef.current >= answer.length) {
+        if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
+        typingIntervalRef.current = null;
+
         setChatMessages((prev) =>
           prev.map((msg) =>
-            msg.content === inputMessage && msg.status === 'pending'
+            msg.timestamp === assistantTimestamp
               ? { ...msg, status: 'sent' }
               : msg
           )
         );
+
+        setIsTyping(false);
+        scrollToBottom();
       }
-
-      setSuggestions(newSuggestions);
-      const assistantTimestamp = new Date().toISOString();
-
-      setChatMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: '', timestamp: assistantTimestamp, status: 'typing' },
-      ]);
-
-      let index = 0;
-      const typingInterval = setInterval(() => {
-        index++;
-        setChatMessages((prev) =>
-          prev.map((msg) =>
-            msg.timestamp === assistantTimestamp
-              ? { ...msg, content: answer.slice(0, index) }
-              : msg
-          )
-        );
-        if (index >= answer.length) {
-          clearInterval(typingInterval);
-          setChatMessages((prev) =>
-            prev.map((msg) =>
-              msg.timestamp === assistantTimestamp ? { ...msg, status: 'sent' } : msg
-            )
-          );
-          setIsTyping(false);
-        }
-      }, 10);
-    } catch (err) {
-      logger.error('handleSend', err);
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.content === inputMessage && msg.role === 'user'
-            ? { ...msg, status: 'failed' }
-            : msg
-        )
-      );
-      setIsTyping(false);
-    } finally {
-      setLoading(false);
-    }
-  };
+    }, 10);
+  } catch (err) {
+    logger.error('handleSend', err);
+    setChatMessages((prev) =>
+      prev.map((msg) =>
+        msg.content === inputMessage && msg.role === 'user'
+          ? { ...msg, status: 'failed' }
+          : msg
+      )
+    );
+    setIsTyping(false);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const retrySend = (msg: IChatMessageWithStatus) => {
     setChatMessages((prev) =>

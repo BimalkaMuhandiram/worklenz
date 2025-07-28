@@ -19,7 +19,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     return OpenAIService.getClient();
   }
 
-  protected static getSystemPrompt(data: any) {
+  protected static async getSystemPrompt(data: any): Promise<ChatCompletionMessageParam> {
   const context = {
     userId: data?.userId,
     teamId: data?.teamId,
@@ -28,7 +28,17 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     purpose: "Assist with project-related queries using company data.",
   };
 
-  return PromptBuilder.buildSystemPrompt(context);
+  // Fetch the user's team IDs from your DB
+  const teamQuery = `
+    SELECT team_id 
+    FROM user_team 
+    WHERE user_id = $1
+  `;
+
+  const result = await db.query(teamQuery, [context.userId]);
+  const userTeamIds = result.rows.map((r) => r.team_id);
+
+  return PromptBuilder.buildSystemPrompt(context, userTeamIds);
 }
 
   protected static async getTeamData(teamId: string) {
@@ -251,7 +261,7 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
   teamId: string;
   schema: string;
 }) {
-  const prompt = PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
+  const prompt = await PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
 
   const systemInstruction: ChatCompletionMessageParam = {
       role: "system",

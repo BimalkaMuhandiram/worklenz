@@ -18,11 +18,18 @@ export interface PromptInput {
   examples?: ReadonlyArray<{ user: string; assistant: string }>;
 }
 
+function secondsToReadableTime(seconds: number) {
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
 export class PromptBuilder {
   static async build(input: PromptInput): Promise<ChatCompletionMessageParam> {
     switch (input.type) {
       case "system":
-        return this.buildSystemPrompt(input.data);
+        const userTeamIds = input.data.userTeamIds || [];
+        return this.buildSystemPrompt(input.data, userTeamIds);
       case "query":
         return await this.buildQueryPrompt(
           input.data.schema,
@@ -90,10 +97,10 @@ export class PromptBuilder {
 }
 
   // More empathetic, proactive system prompt
-  static buildSystemPrompt(data: any): ChatCompletionMessageParam {
-    return {
-      role: "system",
-      content: `
+  static buildSystemPrompt(data: any, userTeamIds: string[]): ChatCompletionMessageParam {
+  return {
+    role: "system",
+    content: `
 You are a highly intelligent, empathetic assistant for the Worklenz project management platform.
 Help users manage tasks, timelines, and team collaboration using natural, conversational language.
 
@@ -101,6 +108,27 @@ Help users manage tasks, timelines, and team collaboration using natural, conver
 \`\`\`json
 ${JSON.stringify(data, null, 2)}
 \`\`\`
+
+## Schema Reference
+You can only use the following tables and columns:
+
+- tasks(id, title, start_date, completed_at, project_id)
+- projects(id, name, team_id)
+- teams(id, name)
+- user_team(user_id, team_id)
+
+To get team information related to a task, **you MUST JOIN through the \`projects\` table** using \`projects.team_id\`.
+
+ \`tasks.team_id\` does **not exist**. Never use it.
+
+## Data Access Rules
+- The user is only authorized to access these team IDs:
+  \`\`\`ts
+  ${JSON.stringify(userTeamIds)}
+  \`\`\`
+- All queries and logic must be scoped to **only** these team IDs.
+- NEVER expose internal IDs like task IDs, team IDs, or raw UUIDs in the response.
+- Do NOT guess or invent table or column names.
 
 ## Responsibilities
 - Understand diverse user intents (updates, summaries, questions, assignments, clarifications).
@@ -112,17 +140,13 @@ ${JSON.stringify(data, null, 2)}
 ## Format
 - Use markdown formatting.
 - Use \`backticks\` for task names, people, and dates.
-- **Never expose raw JSON or internal IDs such as user IDs, team IDs, or task IDs.**
-- If unsure, ask clarifying questions before answering.
-
-## WARNING
-- ONLY use tables and columns explicitly listed in the schema below.
-- Do NOT guess or make up table names or column names.
+- Return only the relevant insights — **not raw SQL**, **not internal IDs**.
+- If unsure, ask clarifying questions.
 
 Respond clearly and helpfully, guiding the user where needed.
-      `.trim(),
-    };
-  }
+    `.trim(),
+  };
+}
 
   // Improved hybrid prompt with richer examples and intent detection
   static buildHybridPrompt(data: any): ChatCompletionMessageParam {
@@ -291,16 +315,26 @@ If you understand the task, proceed to generate a query and summary.
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
   const { items, teamId } = data;
 
-  const filteredItems = Array.isArray(items) ? items.filter(item => String(item.team_id) === String(teamId)) : [];
+  const filteredItems = Array.isArray(items)
+  ? items.filter(item => String(item.team_id) === String(teamId))
+  : [];
 
-  const sanitizedItems = filteredItems.map(item => {
-    const copy = { ...item };
-    delete copy.owner_id;
-    delete copy.status_id;
-    delete copy.team_id;
-    delete copy.id;
-    return copy;
-  });
+const sanitizedItems = filteredItems.map(item => {
+  const copy = { ...item };
+  delete copy.owner_id;
+  delete copy.status_id;
+  delete copy.team_id;
+  delete copy.id;
+  delete copy.project_id;
+  return copy;
+});
+
+const readableItems = sanitizedItems.map(item => ({
+  ...item,
+  avg_completion_time: item.avg_completion_time
+    ? secondsToReadableTime(item.avg_completion_time)
+    : undefined,
+}));
 
   const timestamp = new Date().toISOString();
 
@@ -314,7 +348,7 @@ You are a project assistant. Use the provided data to answer the user's question
 
 ## Data
 \`\`\`json
-${JSON.stringify(sanitizedItems.slice(0, 10), null, 2)}
+${JSON.stringify(readableItems.slice(0, 10), null, 2)}
 \`\`\`
 
 ## Instructions
