@@ -4,6 +4,7 @@ import { OpenAIService } from "./openai-service";
 import { PromptBuilder } from "./prompt-builder";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { AppError } from "../../utils/AppError";
+import { validateSqlQuery } from "../../utils/sqlValidator";
 
 type CachedSchema = {
   timestamp: number;
@@ -207,31 +208,41 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     }
 
     // Step 6: Validate result object
-    if (!result?.is_query || typeof result.query !== "string" || !/team_id\s*=\s*['"]?${teamId}['"]?/i.test(result.query)) {
-      return {
-        summary: result?.summary || "Invalid or unsafe query generated.",
-        data: [],
-      };
-    }
+if (
+  !result?.is_query ||
+  typeof result.query !== "string" ||
+  !new RegExp(`team_id\\s*=\\s*['"]?${teamId}['"]?`, "i").test(result.query)
+) {
+  return {
+    summary: result?.summary || "Invalid or unsafe query generated.",
+    data: [],
+  };
+}
 
-    // Step 7: Execute query safely with try/catch
-    try {
-      const dbResult = await db.query(result.query);
+// Validate SQL query syntax and safety here
+try {
+  validateSqlQuery(result.query, teamId);
+} catch (validationError: any) {
+  return {
+    summary: `Query validation failed: ${validationError.message || validationError}`,
+    data: [],
+  };
+}
 
-      // Consider limiting or summarizing results if large
-
-      return {
-        summary: result.summary,
-        data: dbResult.rows,
-      };
-
-    } catch (err) {
-      console.error("Database query error:", err);
-      return {
-        summary: "We encountered an issue while trying to fetch data. Please try rephrasing your question.",
-        data: [],
-      };
-    }
+// Step 7: Execute query safely with try/catch
+try {
+  const dbResult = await db.query(result.query);
+  return {
+    summary: result.summary,
+    data: dbResult.rows,
+  };
+} catch (err) {
+  console.error("Database query error:", err);
+  return {
+    summary: "We encountered an issue while trying to fetch data. Please try rephrasing your question.",
+    data: [],
+  };
+}
   }
 
   protected static async createChatWithQueryData(

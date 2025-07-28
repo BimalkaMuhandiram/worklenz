@@ -524,7 +524,7 @@ ${JSON.stringify(data.schema, null, 2)}
 - To filter tasks by team, join tasks.project_id = projects.id and filter projects.team_id = '${data.teamId}'.
 - Always restrict data access to team_id = '${data.teamId}' (directly or via join).
 - Use only tables and columns from the schema.
-- Limit results to 100 rows.
+- Limit results to 100 rows. NEVER select internal IDs like team_id, project_id, user_id in the final result. Prefer human-readable names.
 
 ## User query:
 "${data.userMessage}"
