@@ -34,6 +34,7 @@ import {
   suggestionItemStyle,
   stickyInputContainerStyle,
   editTextareaStyle,
+  editTextareaWrapper, 
   editButtonsContainer,
   chatWrapper,
   chatContentWrapper,
@@ -105,28 +106,110 @@ const SmartChatReport: React.FC = () => {
   };
 
   const saveEdit = async () => {
-    if (!editingContent.trim()) {
-      antdMessage.error('Message cannot be empty.');
-      return;
-    }
-    const index = chatMessages.findIndex((msg) => msg.timestamp === editingMessageId);
-    if (index === -1) {
-      antdMessage.error('Message not found.');
-      return;
+  if (!editingContent.trim()) {
+    antdMessage.error('Message cannot be empty.');
+    return;
+  }
+
+  const index = chatMessages.findIndex((msg) => msg.timestamp === editingMessageId);
+  if (index === -1) {
+    antdMessage.error('Message not found.');
+    return;
+  }
+
+  const originalMessage = chatMessages[index];
+
+  const updatedMessage: IChatMessageWithStatus = {
+    ...originalMessage,
+    content: editingContent,
+    status: 'pending',
+  };
+
+  // Replace the message in-place
+  setChatMessages((prev) => {
+    const newMessages = [...prev];
+    newMessages[index] = updatedMessage;
+
+    // Remove the old assistant response after this message if exists
+    const maybeAssistantIndex = index + 1;
+    if (
+      newMessages[maybeAssistantIndex] &&
+      newMessages[maybeAssistantIndex].role === 'assistant'
+    ) {
+      newMessages.splice(maybeAssistantIndex, 1);
     }
 
+    return newMessages;
+  });
+
+  cancelEdit();
+
+  // Send only up to this message for context
+  const contextMessages = chatMessages
+    .slice(0, index + 1)
+    .map(({ role, content }) => ({ role, content }));
+
+  const assistantTimestamp = new Date().toISOString();
+
+  // Add a typing assistant message placeholder
+  setChatMessages((prev) => [
+    ...prev.slice(0, index + 1),
+    {
+      role: 'assistant',
+      content: '',
+      timestamp: assistantTimestamp,
+      status: 'typing',
+    },
+    ...prev.slice(index + 1), // append any messages after
+  ]);
+
+  try {
+    const response = await reportingApiService.getChat({ chat: contextMessages });
+    const answer = response?.body?.answer || 'Unable to generate a response.';
+    const newSuggestions = response?.body?.suggestions || [];
+    setSuggestions(newSuggestions);
+
+    // Typing effect
+    typingIndexRef.current = 0;
+    if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
+
+    typingIntervalRef.current = setInterval(() => {
+      typingIndexRef.current++;
+
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.timestamp === assistantTimestamp
+            ? {
+                ...msg,
+                content: answer.slice(0, typingIndexRef.current),
+              }
+            : msg
+        )
+      );
+
+      if (typingIndexRef.current >= answer.length) {
+        clearInterval(typingIntervalRef.current!);
+        setChatMessages((prev) =>
+          prev.map((msg) =>
+            msg.timestamp === assistantTimestamp
+              ? { ...msg, status: 'sent' }
+              : msg
+          )
+        );
+      }
+    }, 10);
+  } catch (err) {
+    logger.error('saveEdit error', err);
+    antdMessage.error('Failed to update message.');
     setChatMessages((prev) =>
-      prev.map((msg, i) =>
-        i === index ? { ...msg, content: editingContent, status: 'pending' } : msg
+      prev.map((msg) =>
+        msg.timestamp === editingMessageId
+          ? { ...msg, status: 'failed' }
+          : msg
       )
     );
-    cancelEdit();
-    await handleSend(editingContent, true);
-  };
-
-  const deleteMessage = (id: string) => {
-    setChatMessages((prev) => prev.filter((msg) => msg.timestamp !== id));
-  };
+  }
+};
 
   const onPromptsItemClick = (info: any) => {
     const text = info.data.description as string;
@@ -309,7 +392,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                 <div key={msg.timestamp} css={messageWrapperStyle(msg.role)}>
                   <div>
                     {editingMessageId === msg.timestamp && msg.role === 'user' ? (
-                      <>
+                      <div css={editTextareaWrapper}>
                         <textarea
                           css={editTextareaStyle}
                           rows={3}
@@ -322,7 +405,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                           </Button>
                           <Button onClick={cancelEdit}>Cancel</Button>
                         </div>
-                      </>
+                      </div>
                     ) : (
                       <>
                         <Bubble
@@ -356,6 +439,15 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                               onClick={() => handleCopy(msg.content)}
                               title="Copy message"
                             />
+                            {msg.status === 'failed' && (
+                            <Button
+                              danger
+                              size="small"
+                              icon={<ReloadOutlined />}
+                              onClick={() => retrySend(msg)}
+                              title="Retry message"
+                            />
+                            )}
                           </Flex>
                         )}
                       </>

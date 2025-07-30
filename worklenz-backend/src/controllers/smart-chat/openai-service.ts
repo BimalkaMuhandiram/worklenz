@@ -22,16 +22,23 @@ export class OpenAIService {
     return this.client;
   }
 
-  // Count tokens in messages to prevent exceeding model limits
-  private static countTokens(
-    messages: ChatCompletionMessageParam[],
-    model: TiktokenModel
-  ): number {
+  private static async withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 300): Promise<T> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (i === retries - 1) throw err;
+        await new Promise((res) => setTimeout(res, delay * (2 ** i)));
+      }
+    }
+    throw new Error("Retries failed.");
+  }
+
+  private static countTokens(messages: ChatCompletionMessageParam[], model: TiktokenModel): number {
     const encoder = encoding_for_model(model);
     let tokens = 0;
-
     for (const msg of messages) {
-      tokens += 4; // overhead per message
+      tokens += 4;
       if (typeof msg.content === "string") {
         tokens += encoder.encode(msg.content).length;
       } else if (Array.isArray(msg.content)) {
@@ -42,8 +49,7 @@ export class OpenAIService {
         }
       }
     }
-
-    tokens += 2; // priming tokens
+    tokens += 2;
     encoder.free();
     return tokens;
   }
@@ -61,7 +67,6 @@ export class OpenAIService {
     return decoder.decode(new Uint8Array(truncatedEncoded));
   }
 
-  // Trim conversation history intelligently to fit token limits
   private static trimMessagesToFitTokenLimit(
     messages: ChatCompletionMessageParam[],
     maxTokens: number,
@@ -69,14 +74,13 @@ export class OpenAIService {
   ): ChatCompletionMessageParam[] {
     const encoder = encoding_for_model(model);
     const trimmedMessages: ChatCompletionMessageParam[] = [];
-    let totalTokens = 2; // priming tokens
+    let totalTokens = 2;
 
     if (messages.length === 0) {
       encoder.free();
       return [];
     }
 
-    // Handle last message with truncation if needed
     const lastMessage = { ...messages[messages.length - 1] };
     let lastMsgTokens = 4;
 
@@ -101,7 +105,6 @@ export class OpenAIService {
     trimmedMessages.push(lastMessage);
     totalTokens += lastMsgTokens;
 
-    // Add earlier messages until maxTokens reached
     for (let i = messages.length - 2; i >= 0; i--) {
       const msg = messages[i];
       let tokenCount = 4;
@@ -124,13 +127,6 @@ export class OpenAIService {
     return trimmedMessages.reverse();
   }
 
-  /**
-   * Creates a chat completion from given messages.
-   * Automatically trims messages to fit token limits.
-   * @param messages conversation messages array
-   * @param temperature optional sampling temperature (default 0.7)
-   * @param maxResponseTokens optional max tokens for response (default 1000)
-   */
   public static async createChatCompletion(
     messages: ChatCompletionMessageParam[],
     temperature = 0.7,
@@ -148,12 +144,14 @@ export class OpenAIService {
       throw new Error("No valid messages after trimming for token limit.");
     }
 
-    const response = await this.client.chat.completions.create({
-      model: this.MODEL,
-      messages: trimmedMessages,
-      temperature,
-      max_tokens: maxResponseTokens,
-    });
+    const response = await this.withRetry(() =>
+      this.client.chat.completions.create({
+        model: this.MODEL,
+        messages: trimmedMessages,
+        temperature,
+        max_tokens: maxResponseTokens,
+      })
+    );
 
     if (!response.choices?.length) {
       throw new Error("No choices returned from OpenAI");
@@ -165,15 +163,16 @@ export class OpenAIService {
     };
   }
 
-  // Simple utility to get AI response from a prompt string
   public static async getOpenAiResponse(prompt: string): Promise<string> {
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.MODEL,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: this.DEFAULT_RESPONSE_TOKENS,
-      });
+      const response = await this.withRetry(() =>
+        this.client.chat.completions.create({
+          model: this.MODEL,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_tokens: this.DEFAULT_RESPONSE_TOKENS,
+        })
+      );
 
       const content = response.choices[0]?.message?.content;
 
@@ -182,9 +181,10 @@ export class OpenAIService {
       }
 
       if (Array.isArray(content)) {
-        const textParts = (content as (ChatCompletionContentPart | ChatCompletionContentPartRefusal)[])
-          .filter(isTextPart)
+        const textParts = (content as Array<ChatCompletionContentPart | ChatCompletionContentPartRefusal>)
+          .filter((part): part is ChatCompletionContentPartText => isTextPart(part))
           .map((part) => part.text);
+
         return textParts.join("");
       }
 
@@ -250,73 +250,63 @@ Suggest 2 natural and helpful follow-up questions the user might ask next:
   }
 
   public static async classifyUserIntent(userMessage: string): Promise<string> {
-  const prompt = `
-Classify the user's message intent into one of these categories:
-- data_query
-- chit_chat
-- help
-- other
+    const prompt = `
+Classify this message into one of the following: data_query, chit_chat, help, other.
+Respond ONLY with one of these keywords.
 
-Use the following examples:
-- "What tasks are due this week?" → data_query
-- "List all tasks assigned to me" → data_query
-- "What's the weather?" → chit_chat
-- "How do I use this?" → help
-
-Message:
-"""${userMessage}"""
-
-Only return: data_query, chit_chat, help, or other.
+Message: "${userMessage}"
 `;
 
-  try {
-    const completion = await this.client.chat.completions.create({
-      model: this.MODEL,
-      messages: [
-        { role: "system", content: "You are an intent classifier." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 10,
-    });
+    try {
+      const completion = await this.withRetry(() =>
+        this.client.chat.completions.create({
+          model: this.MODEL,
+          messages: [
+            { role: "system", content: "You are an intent classifier." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0,
+          max_tokens: 10,
+        })
+      );
 
-    const messageContent = completion.choices[0].message?.content;
+      const content = completion.choices[0].message?.content?.trim().toLowerCase();
 
-    const content = messageContent ? messageContent.trim().toLowerCase() : "";
+      if (["data_query", "chit_chat", "help", "other"].includes(content || "")) {
+        return content!;
+      }
 
-    if (["data_query", "chit_chat", "help", "other"].includes(content)) {
-      return content;
+      return "other";
+    } catch (err) {
+      console.error("Error classifying user intent:", err);
+      return "other";
     }
-    return "other";
-  } catch (err) {
-    console.error("Error classifying user intent:", err);
-    return "other";
   }
-}
 
-  // Get embedding vector for a single text, using updated embedding model
   public static async getEmbedding(text: string): Promise<number[]> {
-    const response = await this.client.embeddings.create({
-      model: "text-embedding-3-large",
-      input: text,
-    });
+    const response = await this.withRetry(() =>
+      this.client.embeddings.create({
+        model: "text-embedding-3-large",
+        input: text,
+      })
+    );
 
     return response.data[0].embedding;
   }
 
-  // Efficient batch embedding retrieval for multiple texts
   public static async getBatchEmbeddings(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
 
-    const response = await this.client.embeddings.create({
-      model: "text-embedding-3-large",
-      input: texts,
-    });
+    const response = await this.withRetry(() =>
+      this.client.embeddings.create({
+        model: "text-embedding-3-large",
+        input: texts,
+      })
+    );
 
     return response.data.map((item) => item.embedding);
   }
 
-  // Compute cosine similarity between two vectors
   public static cosineSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length) {
       throw new Error("Vectors must be the same length for cosine similarity.");
@@ -338,7 +328,6 @@ Only return: data_query, chit_chat, help, or other.
   }
 }
 
-// Type guard to distinguish text parts in streaming or chunked responses
 function isTextPart(
   part: ChatCompletionContentPart | ChatCompletionContentPartRefusal
 ): part is ChatCompletionContentPartText {

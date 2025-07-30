@@ -162,7 +162,7 @@ export const suggestionItemStyle = css`
 // Edit Area
 export const editTextareaStyle = css`
   width: 100%;
-  max-width: 1000px;
+  max-width: 100% !important;
   border-radius: 8px;
   padding: 12px;
   font-size: 14px;
@@ -171,6 +171,12 @@ export const editTextareaStyle = css`
   background-color: var(--background-color, #fff);
   color: var(--text-color, #000);
   border: 1px solid var(--border-color, #ccc);
+`;
+
+export const editTextareaWrapper = css`
+  width: 100%;
+  max-width: 100% !important; 
+  margin: 0 auto; 
 `;
 
 export const editButtonsContainer = css`
@@ -190,7 +196,7 @@ export const chatWrapper = css`
 
 export const chatContentWrapper = css`
   width: 100%;
-  max-width: 1100px;
+  max-width: 60%;
   margin: 0 auto; /* center horizontally */
   display: flex;
   flex-direction: column;

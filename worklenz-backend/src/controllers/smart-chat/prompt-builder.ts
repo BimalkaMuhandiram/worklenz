@@ -18,6 +18,11 @@ export interface PromptInput {
   examples?: ReadonlyArray<{ user: string; assistant: string }>;
 }
 
+// UUID validation function
+function isValidUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
 function secondsToReadableTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
@@ -27,16 +32,41 @@ function secondsToReadableTime(seconds: number) {
 export class PromptBuilder {
   static async build(input: PromptInput): Promise<ChatCompletionMessageParam> {
     switch (input.type) {
-      case "system":
-        const userTeamIds = input.data.userTeamIds || [];
-        return this.buildSystemPrompt(input.data, userTeamIds);
-      case "query":
+      case "system": {
+        // Validate and filter userTeamIds before use
+        const rawTeamIds = input.data.userTeamIds || [];
+        const filteredTeamIds = rawTeamIds.filter(isValidUUID);
+        if (filteredTeamIds.length === 0) {
+          throw new Error("No valid team IDs provided.");
+        }
+        return this.buildSystemPrompt(input.data, filteredTeamIds);
+      }
+      case "query": {
+        // Validate the single teamId if it's a string, or filter if array
+        let teamIdInput = input.data.teamId;
+        let filteredTeamIds: string[] = [];
+        if (Array.isArray(teamIdInput)) {
+          filteredTeamIds = teamIdInput.filter(isValidUUID);
+          if (filteredTeamIds.length === 0) {
+            throw new Error("No valid team IDs provided.");
+          }
+        } else if (typeof teamIdInput === "string") {
+          if (!isValidUUID(teamIdInput)) {
+            throw new Error("Invalid team ID provided.");
+          }
+          filteredTeamIds = [teamIdInput];
+        } else {
+          throw new Error("Invalid teamId input.");
+        }
+
+        const teamIdForPrompt = filteredTeamIds[0];
         return await this.buildQueryPrompt(
           input.data.schema,
-          input.data.teamId,
+          teamIdForPrompt,
           input.data.userMessage,
           input.data.fullSchemaDescriptions
         );
+      }
       case "response":
         return this.buildResponsePrompt(input.data);
       case "few-shot":
@@ -46,10 +76,11 @@ export class PromptBuilder {
       case "hybrid":
         return this.buildHybridPrompt(input.data);
       case "sql-query":
+        // Similar validation for sql-query prompt if needed
         return this.buildSQLQueryPrompt(input.data);
       case "sql-result":
         return this.buildAnswerFromResultsPrompt(input.data);
-      case "enhanced-response": 
+      case "enhanced-response":
         return this.buildEnhancedResponsePrompt(input.data);
       default:
         // fallback prompt instead of throwing
@@ -98,9 +129,9 @@ export class PromptBuilder {
 
   // More empathetic, proactive system prompt
   static buildSystemPrompt(data: any, userTeamIds: string[]): ChatCompletionMessageParam {
-  return {
-    role: "system",
-    content: `
+    return {
+      role: "system",
+      content: `
 You are a highly intelligent, empathetic assistant for the Worklenz project management platform.
 Help users manage tasks, timelines, and team collaboration using natural, conversational language.
 
@@ -144,9 +175,9 @@ To get team information related to a task, **you MUST JOIN through the \`project
 - If unsure, ask clarifying questions.
 
 Respond clearly and helpfully, guiding the user where needed.
-    `.trim(),
-  };
-}
+      `.trim(),
+    };
+  }
 
   // Improved hybrid prompt with richer examples and intent detection
   static buildHybridPrompt(data: any): ChatCompletionMessageParam {
@@ -186,7 +217,7 @@ Reply in markdown. Keep responses concise and include actionable suggestions.
     };
   }
 
-  // New prompt for enhancing any kind of user response with empathy, clarity, and follow-ups
+  // Enhance any kind of user response with empathy, clarity, and follow-ups
   static buildEnhancedResponsePrompt(data: { userMessage: string; previousResponse?: string }): ChatCompletionMessageParam {
     return {
       role: "system",
@@ -214,11 +245,14 @@ If the user query is complex or multi-part, break down the response into clear s
   // Convert natural language into SQL with enriched context
   static async buildQueryPrompt(
   schema: any,
-  teamId: string,
+  teamId: string | string[],
   userMessage: string,
   fullSchemaDescriptions: any[]
 ): Promise<ChatCompletionMessageParam> {
   const relevantSchemaInfo = await this.enrichSchemaWithRelevantInfo(userMessage, fullSchemaDescriptions);
+
+  // Convert teamId to string for prompt usage
+  const teamIdStr = Array.isArray(teamId) ? teamId.join(", ") : teamId;
 
   const joinUserNameNote = `
 ## How to get team member names:
@@ -239,7 +273,7 @@ If the user query is complex or multi-part, break down the response into clear s
 - NOT all tables have a \`team_id\` column.
 - NEVER assume \`team_id\` exists on \`tasks\` or \`team_members\`.
 - Instead, JOIN related tables like \`projects\` and apply \`team_id\` filter there:
-  Example: JOIN projects p ON t.project_id = p.id WHERE p.team_id = '${teamId}'
+  Example: JOIN projects p ON t.project_id = p.id WHERE p.team_id IN (${teamIdStr.split(", ").map(id => `'${id}'`).join(", ")})
 `;
 
   const disambiguationNote = `
@@ -248,6 +282,8 @@ If the user query is complex or multi-part, break down the response into clear s
 - Avoid using columns that do not exist.
 - Use aliases consistently: \`t\` = tasks, \`p\` = projects, \`u\` = users, \`tm\` = team_members.
 `;
+
+const schemaFromEnv = process.env.SCHEMA || "";
 
   return {
     role: "system",
@@ -294,7 +330,7 @@ ${JSON.stringify(schema, null, 2)}
 
 ## Instructions
 - Only use columns and tables that exist.
-- Always apply \`team_id = '${teamId}'\` by JOINING the appropriate table (e.g., \`projects\`).
+- Always apply \`team_id IN (${teamIdStr.split(", ").map(id => `'${id}'`).join(", ")})\` by JOINING the appropriate table (e.g., \`projects\`).
 - Never filter on non-existent columns like \`t.team_id\` or \`tm.name\`.
 - Limit result rows to 100.
 - Avoid subqueries unless necessary.
@@ -465,11 +501,11 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
     };
   }
 
-  // Create SQL with schema and user context (same as original)
+  // Create SQL with schema and user context
   static buildSQLQueryPrompt(data: {
   userMessage: string;
   userId: string;
-  teamId: string;
+  teamId: string | string[];
   schema: any;
 }): ChatCompletionMessageParam {
   const joinUsersNote = `
@@ -498,6 +534,13 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
 - Refer to the full schema below to avoid ambiguity.
 `;
 
+  const teamIds = Array.isArray(data.teamId) ? data.teamId : [data.teamId];
+  const formattedTeamIds = teamIds.map(id => `'${id}'`).join(", ");
+  const teamRestrictionClause =
+    teamIds.length > 1
+      ? `projects.team_id IN (${formattedTeamIds})`
+      : `projects.team_id = '${teamIds[0]}'`;
+
   return {
     role: "user",
     content: `
@@ -507,9 +550,7 @@ Highlight any assumptions and potential ambiguities, and how you would verify th
 - If uncertain, return an error or ask for clarification.
 
 ${joinUsersNote}
-
 ${statusFilterNote}
-
 ${disambiguationNote}
 
 ## Database Schema
@@ -517,14 +558,18 @@ ${disambiguationNote}
 ${JSON.stringify(data.schema, null, 2)}
 \`\`\`
 
-## Team ID: '${data.teamId}'
+## Team Filter Rule:
+- You are only allowed to access data for team_id(s): [${teamIds.join(", ")}].
+- You MAY compare teams (e.g., count tasks per team or group by team_id) **if multiple teams are allowed**.
+- All queries MUST restrict results to only these team_id(s) using a WHERE clause (directly or via JOIN).
+- Do NOT access or include data from any other team_id.
 
 ## Additional Notes:
 - The "tasks" table does NOT have a "team_id" column.
-- To filter tasks by team, join tasks.project_id = projects.id and filter projects.team_id = '${data.teamId}'.
-- Always restrict data access to team_id = '${data.teamId}' (directly or via join).
-- Use only tables and columns from the schema.
-- Limit results to 100 rows. NEVER select internal IDs like team_id, project_id, user_id in the final result. Prefer human-readable names.
+- To scope tasks by team, always join \`tasks.project_id = projects.id\` and filter by \`projects.team_id IN (${formattedTeamIds})\`.
+- When comparing teams, use \`GROUP BY projects.team_id\` or join with the \`teams\` table for readable names.
+- Limit results to 100 rows.
+- NEVER select internal IDs like team_id, project_id, user_id in the final result. Prefer human-readable names.
 
 ## User query:
 "${data.userMessage}"
@@ -539,7 +584,7 @@ ${JSON.stringify(data.schema, null, 2)}
   };
 }
 
-  // Turn query output into human insight (same as original)
+  // Turn query output into human insight 
   static buildAnswerFromResultsPrompt(data: {
     userMessage: string;
     queryResult: any[];

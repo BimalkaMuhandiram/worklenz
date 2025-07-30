@@ -185,8 +185,6 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
     // Step 4: Insert prompt at beginning of message array to maintain context order
     messages.unshift(queryPrompt);
 
-    // Optional: trim messages to max token count here if needed
-
     // Step 5: Call AI to generate query or summary
     let aiResponse;
     try {
@@ -196,16 +194,28 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       throw new AppError("AI service is currently unavailable.", 503);
     }
 
-    // Clean AI response and parse JSON
-    const cleaned = aiResponse?.content?.replace(/```(json)?|\\n|\\r/g, "").trim() || "{}";
+    // Clean AI response content safely, preserving newlines and spaces
+    let cleaned = aiResponse?.content;
 
-    let result: any;
-    try {
-      result = JSON.parse(cleaned);
-    } catch {
-      console.error("Invalid AI JSON response:", cleaned);
-      throw new AppError("Unable to process the request. Please try again.");
-    }
+    if (typeof cleaned === "string") {
+      // Remove markdown code fences but keep newlines intact
+      cleaned = cleaned.replace(/```(json)?|```/g, "").trim();
+
+      // Replace escaped newlines (\n) with actual newline characters
+      cleaned = cleaned.replace(/\\n/g, "\n");
+
+      cleaned = cleaned.replace(/[ \t]+/g, " ");
+    } else {
+    cleaned = "{}";
+  }
+
+  let result: any;
+  try {
+    result = JSON.parse(cleaned);
+  } catch (err) {
+    console.error("Invalid AI JSON response:", cleaned);
+    throw new AppError("Unable to process the request. Please try again.");
+  }
 
     // Step 6: Validate result object
 if (
@@ -269,14 +279,20 @@ try {
 }: {
   userMessage: string;
   userId: string;
-  teamId: string;
+  teamId: string | string[];
   schema: string;
 }) {
   const prompt = await PromptBuilder.buildSQLQueryPrompt({ userMessage, userId, teamId, schema });
 
   const systemInstruction: ChatCompletionMessageParam = {
-      role: "system",
-      content: `You must only generate SQL queries that restrict results to team_id = '${teamId}'. Never expose data from other teams.`,
+    role: "system",
+    content:
+      `You must only generate SQL queries that restrict access to the user's authorized teams.\n` +
+      (Array.isArray(teamId)
+        ? `The user is allowed to access multiple teams with IDs: [${teamId.join(", ")}]. ` +
+          `You MAY compare or rank these teams (e.g., GROUP BY team_id), but do NOT include data from any other team.\n`
+        : `The user is only allowed to access team_id = '${teamId}'. Do NOT show data from other teams.\n`) +
+      `If you are unsure, ask for clarification or return an error.`,
   };
 
   let res;
@@ -288,21 +304,35 @@ try {
   }
 
   try {
-  let content = res?.content;
-  if (Buffer.isBuffer(content)) content = content.toString("utf-8");
-  if (typeof content !== "string") content = String(content);
+    let content = res?.content;
+    if (Buffer.isBuffer(content)) content = content.toString("utf-8");
+    if (typeof content !== "string") content = String(content);
 
-  let cleaned = content.replace(/```json|```/g, "").trim();
+    let cleaned = content
+      .replace(/```json|```/g, "")         // Remove markdown fences
+      .replace(/[\u0000-\u001F]+/g, " ")   // Remove control chars
+      .replace(/\r?\n|\r/g, " ")           // Remove line breaks
+      .replace(/\\/g, "\\\\")              // Double backslashes for safe JSON parsing
+      .replace(/\s{2,}/g, " ")             // Collapse excessive whitespace
+      .trim();
 
-  cleaned = cleaned.replace(/\\\s*\n/g, " ");
+    const parsed = JSON.parse(cleaned || "{}");
 
-  cleaned = cleaned.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+    if (parsed?.query && typeof parsed.query === "string") {
+      parsed.query = parsed.query
+        .replace(/\\n/g, " ")     // Treat \n as space
+        .replace(/\\t/g, " ")     // Treat \t as space
+        .replace(/\\"/g, '"')     // Unescape double quotes
+        .replace(/\\+/g, " ")     // REMOVE all backslashes 
+        .replace(/\s{2,}/g, " ")  // Clean up any extra whitespace
+        .trim();
+    }
 
-  return JSON.parse(cleaned || "{}");
-} catch (err) {
-  console.error("Failed to parse SQL query from AI response:", err, res?.content);
-  throw new AppError("Unable to understand the request. Please try rephrasing your message.", 400);
-}
+    return parsed;
+  } catch (err) {
+    console.error("Failed to parse SQL query from AI response:", err, res?.content);
+    throw new AppError("Unable to understand the request. Please try rephrasing your message.", 400);
+  }
 }
 
   protected static async getAnswerFromQueryResult({

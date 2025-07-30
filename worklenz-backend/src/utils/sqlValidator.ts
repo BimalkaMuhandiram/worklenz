@@ -15,7 +15,11 @@ const ALLOWED_TABLES = [
   "project_categories"
 ];
 
-export function validateSqlQuery(sql: string, requiredTeamId: string) {
+// Main validator function: accepts single string or string[]
+export function validateSqlQuery(sql: string, requiredTeamIds: string | string[]) {
+  // Normalize to array
+  const allowedTeamIds = Array.isArray(requiredTeamIds) ? requiredTeamIds : [requiredTeamIds];
+
   let ast;
   try {
     ast = parser.astify(sql, { database: "postgresql" });
@@ -23,16 +27,13 @@ export function validateSqlQuery(sql: string, requiredTeamId: string) {
     throw new Error("SQL Parsing Error: Invalid SQL syntax.");
   }
 
-  // Support array for multiple statements, if any
   const statements = Array.isArray(ast) ? ast : [ast];
 
   for (const statement of statements) {
-    // 1. Only allow SELECT queries
     if (statement.type !== "select") {
       throw new Error("Only SELECT queries are allowed.");
     }
 
-    // 2. Validate table names
     const tables = extractTables(statement);
     for (const tbl of tables) {
       if (!ALLOWED_TABLES.includes(tbl)) {
@@ -40,46 +41,70 @@ export function validateSqlQuery(sql: string, requiredTeamId: string) {
       }
     }
 
-    // 3. Validate presence of team_id filter in WHERE clause
-    if (!hasValidTeamIdFilter(statement.where, requiredTeamId)) {
-      throw new Error(`Query must filter results by team_id = '${requiredTeamId}'.`);
+    if (!hasValidTeamIdFilter(statement.where, allowedTeamIds)) {
+      throw new Error(`Query must filter results by team_id(s): ${allowedTeamIds.join(", ")}.`);
     }
   }
 }
 
-// Helper to extract table names from AST statement
+// Extract all table names from FROM clause and joins
 function extractTables(statement: any): string[] {
   const tables: string[] = [];
 
   if (statement.from && Array.isArray(statement.from)) {
     for (const fromEntry of statement.from) {
-      if (fromEntry.table) tables.push(fromEntry.table);
-      // handle joins, subqueries if needed
+      if (fromEntry.table) {
+        tables.push(fromEntry.table);
+      }
+
+      // Check joins recursively
+      if (fromEntry.join) {
+        for (const joinEntry of fromEntry.join) {
+          if (joinEntry.table) {
+            tables.push(joinEntry.table);
+          }
+        }
+      }
     }
   }
 
   return tables;
 }
 
-// Helper to check team_id filter in WHERE clause
-function hasValidTeamIdFilter(where: any, requiredTeamId: string): boolean {
+// Check if WHERE clause filters on any allowed team_id
+function hasValidTeamIdFilter(where: any, allowedTeamIds: string[]): boolean {
   if (!where) return false;
 
-  // Recursively check WHERE AST for team_id = 'requiredTeamId'
   if (where.type === "binary_expr") {
+    // Check for equality: team_id = 'some-id'
     if (
-      (where.left.type === "column_ref" && where.left.column === "team_id") &&
-      (where.operator === "=") &&
-      ((where.right.type === "string" && where.right.value === requiredTeamId) ||
-        (where.right.type === "number" && String(where.right.value) === requiredTeamId))
+      where.left.type === "column_ref" &&
+      where.left.column === "team_id" &&
+      where.operator === "=" &&
+      where.right.type === "string" &&
+      allowedTeamIds.includes(where.right.value)
     ) {
       return true;
     }
-    // Check left and right recursively for AND/OR expressions
-    return (
-      hasValidTeamIdFilter(where.left, requiredTeamId) ||
-      hasValidTeamIdFilter(where.right, requiredTeamId)
-    );
+
+    // Check IN clause: team_id IN (...)
+    if (
+      where.left.type === "column_ref" &&
+      where.left.column === "team_id" &&
+      where.operator.toLowerCase() === "in" &&
+      where.right.type === "expr_list"
+    ) {
+      const values = where.right.value
+        .filter((v: any) => v.type === "string")
+        .map((v: any) => v.value);
+      if (values.some((val: string) => allowedTeamIds.includes(val))) {
+        return true;
+      }
+    }
+
+    // Recursively check AND/OR expressions
+    return hasValidTeamIdFilter(where.left, allowedTeamIds) || hasValidTeamIdFilter(where.right, allowedTeamIds);
   }
+
   return false;
 }
