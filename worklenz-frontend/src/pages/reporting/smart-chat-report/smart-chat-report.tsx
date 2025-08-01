@@ -456,7 +456,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
               {suggestions.length > 0 && (
                 <div css={suggestionsBoxStyle}>
                   <Typography.Text css={suggestionsTitleStyle}></Typography.Text>
-                  <ul style={{ paddingLeft: 100, margin: 20 }}> 
+                  <ul style={{ paddingLeft: 170, margin: 5 }}> 
                     {suggestions.map((s, i) => (
                       <li
                         key={i}

@@ -157,7 +157,7 @@ export const suggestionItemStyle = css`
   font-size: 13px;
   cursor: pointer;
   user-select: none;
-  margin: 2px; 
+  margin: 4px; 
 
   &:hover {
     background-color: var(--suggestion-hover-bg, #807a7aff);
