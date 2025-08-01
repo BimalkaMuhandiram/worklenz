@@ -139,7 +139,7 @@ export const suggestionsBoxStyle = css`
 
   & > ul 
       padding-left: 0; 
-      margin: 10px 0; 
+      margin: 2px 0; 
   }
 `;
 
