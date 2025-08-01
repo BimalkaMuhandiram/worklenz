@@ -118,50 +118,40 @@ const SmartChatReport: React.FC = () => {
   }
 
   const originalMessage = chatMessages[index];
-
   const updatedMessage: IChatMessageWithStatus = {
     ...originalMessage,
     content: editingContent,
     status: 'pending',
   };
 
-  // Replace the message in-place
-  setChatMessages((prev) => {
-    const newMessages = [...prev];
-    newMessages[index] = updatedMessage;
+  const assistantTimestamp = new Date().toISOString();
 
-    // Remove the old assistant response after this message if exists
-    const maybeAssistantIndex = index + 1;
-    if (
-      newMessages[maybeAssistantIndex] &&
-      newMessages[maybeAssistantIndex].role === 'assistant'
-    ) {
-      newMessages.splice(maybeAssistantIndex, 1);
-    }
+  const newMessages = [...chatMessages];
+  newMessages[index] = updatedMessage;
 
-    return newMessages;
-  });
+  if (
+    newMessages[index + 1] &&
+    newMessages[index + 1].role === 'assistant'
+  ) {
+    newMessages.splice(index + 1, 1);
+  }
 
-  cancelEdit();
-
-  // Send only up to this message for context
-  const contextMessages = chatMessages
+  const contextMessages = newMessages
     .slice(0, index + 1)
     .map(({ role, content }) => ({ role, content }));
 
-  const assistantTimestamp = new Date().toISOString();
-
-  // Add a typing assistant message placeholder
-  setChatMessages((prev) => [
-    ...prev.slice(0, index + 1),
+  setChatMessages([
+    ...newMessages.slice(0, index + 1),
     {
       role: 'assistant',
       content: '',
       timestamp: assistantTimestamp,
       status: 'typing',
     },
-    ...prev.slice(index + 1), // append any messages after
+    ...newMessages.slice(index + 1),
   ]);
+
+  cancelEdit();
 
   try {
     const response = await reportingApiService.getChat({ chat: contextMessages });
@@ -169,7 +159,6 @@ const SmartChatReport: React.FC = () => {
     const newSuggestions = response?.body?.suggestions || [];
     setSuggestions(newSuggestions);
 
-    // Typing effect
     typingIndexRef.current = 0;
     if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
 
@@ -179,16 +168,14 @@ const SmartChatReport: React.FC = () => {
       setChatMessages((prev) =>
         prev.map((msg) =>
           msg.timestamp === assistantTimestamp
-            ? {
-                ...msg,
-                content: answer.slice(0, typingIndexRef.current),
-              }
+            ? { ...msg, content: answer.slice(0, typingIndexRef.current) }
             : msg
         )
       );
 
       if (typingIndexRef.current >= answer.length) {
         clearInterval(typingIntervalRef.current!);
+        typingIntervalRef.current = null;
         setChatMessages((prev) =>
           prev.map((msg) =>
             msg.timestamp === assistantTimestamp
@@ -303,7 +290,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
 
       if (typingIndexRef.current >= answer.length) {
         if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
-        typingIntervalRef.current = null;
+        typingIntervalRef.current = null; 
 
         setChatMessages((prev) =>
           prev.map((msg) =>
@@ -415,7 +402,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                           css={msg.role === 'user' ? bubbleUserStyle : bubbleAssistantStyle}
                           variant={msg.role === 'assistant' ? 'borderless' : undefined}
                         />
-                        {msg.role === 'assistant' && (
+                        {msg.role === 'assistant' && msg.status === 'sent' && (
                           <Flex justify="flex-start" style={{ marginTop: 6 }}>
                             <CopyOutlined
                               style={{ cursor: 'pointer' }}
@@ -439,15 +426,6 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                               onClick={() => handleCopy(msg.content)}
                               title="Copy message"
                             />
-                            {msg.status === 'failed' && (
-                            <Button
-                              danger
-                              size="small"
-                              icon={<ReloadOutlined />}
-                              onClick={() => retrySend(msg)}
-                              title="Retry message"
-                            />
-                            )}
                           </Flex>
                         )}
                       </>
@@ -464,7 +442,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
                         Retry
                     </Button>
                   )}
-                  </div>
+                </div>
                 ))}
                 {isTyping && (
                   <Bubble role="assistant" typing={{ step: 1, interval: 40 }} content="..." />
@@ -478,7 +456,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
               {suggestions.length > 0 && (
                 <div css={suggestionsBoxStyle}>
                   <Typography.Text css={suggestionsTitleStyle}></Typography.Text>
-                  <ul style={{ paddingLeft: 100, margin: 20 }}>
+                  <ul style={{ paddingLeft: 100, margin: 20 }}> 
                     {suggestions.map((s, i) => (
                       <li
                         key={i}

@@ -27,7 +27,7 @@ export const firstScreenPrompts: PromptsProps['items'] = [
     children: [
       {
         key: 'urgent-deadlines',
-        description: 'What are the overdue projects',
+        description: 'What are the all overdue projects',
         icon: <RocketOutlined style={{ color: '#52c41a' }} />,
       },
       {

@@ -71,7 +71,7 @@ export const stickyInputContainerStyle = css`
   background-color: var(--background-color, #fff);
   display: flex;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 4px 12px; 
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
   z-index: 20;
 `;
@@ -135,7 +135,12 @@ export const suggestionsBoxStyle = css`
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 24px 0 12px 0;
+  margin: 8px 0 4px 0; 
+
+  & > ul 
+      padding-left: 0; 
+      margin: 10px 0; 
+  }
 `;
 
 export const suggestionsTitleStyle = css`
@@ -147,12 +152,12 @@ export const suggestionsTitleStyle = css`
 export const suggestionItemStyle = css`
   background-color: var(--suggestion-bg, #898585ff);
   color: var(--suggestion-text, #333);
-  padding: 6px 12px;
+  padding: 4px 8px; 
   border-radius: 999px;
   font-size: 13px;
   cursor: pointer;
   user-select: none;
-  margin: 4px;
+  margin: 2px; 
 
   &:hover {
     background-color: var(--suggestion-hover-bg, #807a7aff);
@@ -206,7 +211,7 @@ export const chatContentWrapper = css`
 export const inputAreaStyle = css`
   width: 100%;
   max-width: 800px;
-  padding: 12px;
+  padding: 4px 12px; 
 `;
 
 // Centered input before messages

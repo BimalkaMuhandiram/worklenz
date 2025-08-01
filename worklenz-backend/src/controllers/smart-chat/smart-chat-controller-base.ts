@@ -59,6 +59,10 @@ export default class SmartChatControllerBase extends ReportingControllerBase {
       return this.schemaCache.schema;
     }
 
+    if (!process.env.TABLES) {
+      console.warn("Environment variable TABLES not set. Schema may be incomplete.");
+    }
+
     const tables = (process.env.TABLES || "")
       .split(",")
       .map((t) => t.trim())

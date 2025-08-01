@@ -330,9 +330,14 @@ ${JSON.stringify(schema, null, 2)}
 
 ## Instructions
 - Only use columns and tables that exist.
+- To count overdue projects or tasks, use:
+  \`projects.project_status = 'overdue'\` OR \`projects.end_date < CURRENT_DATE\`
+- Always GROUP BY the relevant name field (e.g., team name or user full name) when comparing counts.
 - Always apply \`team_id IN (${teamIdStr.split(", ").map(id => `'${id}'`).join(", ")})\` by JOINING the appropriate table (e.g., \`projects\`).
 - Never filter on non-existent columns like \`t.team_id\` or \`tm.name\`.
-- Limit result rows to 100.
+- ORDER results by count descending if the user wants the "most" or "top" of something.
+- Do NOT use LIMIT unless the user specifically asks for it.
+- Use COUNT(*) to count items accurately.
 - Avoid subqueries unless necessary.
 
 ## Natural Language User Request
@@ -415,12 +420,12 @@ If the list is empty, say "No data found".
 }`
   },
   {
-    user: "List tasks due this week assigned to John for project Beta.",
-    assistant: `{
-  "summary": "Tasks due this week assigned to John in project Beta",
-  "query": "SELECT t.id, t.name AS task_name, t.due_date, u.name AS assignee_name, p.name AS project_name FROM tasks t JOIN users u ON t.assignee = u.id JOIN projects p ON t.project_id = p.id WHERE u.name = 'John' AND p.name = 'Beta' AND t.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND p.team_id = '...' LIMIT 100",
-  "is_query": true
-}`
+  user: "Which teams have the most overdue projects?",
+  assistant: `{
+    "summary": "Overdue project count per team",
+    "query": "SELECT teams.name AS team_name, COUNT(*) AS overdue_count FROM projects JOIN teams ON projects.team_id = teams.id WHERE projects.project_status = 'overdue' OR projects.end_date < CURRENT_DATE GROUP BY teams.name ORDER BY overdue_count DESC",
+    "is_query": true
+  }`
   },
   {
     user: "What tasks were completed last week?",
@@ -600,9 +605,14 @@ And the following query result data (JSON):
 ${JSON.stringify(data.queryResult, null, 2)}
 \`\`\`
 
-Summarize the data clearly and helpfully. 
+Summarize the data clearly and helpfully.
 
-Respond in markdown using backticks \` for names and dates.
+- Mention all teams or items listed in the result.
+- Preserve exact counts or values (do not change or guess numbers).
+- If results include rankings (e.g., overdue count per team), list them from highest to lowest.
+- Use bullet points if helpful.
+- Respond in markdown using backticks \` for names, numbers, and dates.
+- Do NOT make assumptions or skip rows.
       `.trim(),
     };
   }
