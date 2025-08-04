@@ -156,7 +156,10 @@ const SmartChatReport: React.FC = () => {
   try {
     const response = await reportingApiService.getChat({ chat: contextMessages });
     const answer = response?.body?.answer || 'Unable to generate a response.';
-    const newSuggestions = response?.body?.suggestions || [];
+    const newSuggestions = (response?.body?.suggestions || []).map(s =>
+      s.replace(/^"(.*)"$/, '$1')
+    );
+
     setSuggestions(newSuggestions);
 
     typingIndexRef.current = 0;
@@ -239,7 +242,9 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
     // Step 3: Call API
     const response = await reportingApiService.getChat({ chat: trimmedMessages });
     const answer = response?.body?.answer || 'Unable to generate a response.';
-    const newSuggestions = response?.body?.suggestions || [];
+    const newSuggestions = (response?.body?.suggestions || []).map(s =>
+      s.replace(/^"(.*)"$/, '$1')
+    );
 
     // Step 4: Mark user message as sent
     setChatMessages((prev) =>
@@ -456,7 +461,7 @@ const handleSend = async (inputMessage: string, isRetry = false) => {
               {suggestions.length > 0 && (
                 <div css={suggestionsBoxStyle}>
                   <Typography.Text css={suggestionsTitleStyle}></Typography.Text>
-                  <ul style={{ paddingLeft: 170, margin: 5 }}> 
+                  <ul style={{ paddingLeft: 300, margin: 5 }}> 
                     {suggestions.map((s, i) => (
                       <li
                         key={i}

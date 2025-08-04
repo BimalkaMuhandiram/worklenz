@@ -346,27 +346,68 @@ try {
   userMessage: string;
   result: any[];
 }) {
-  const prompt = PromptBuilder.buildAnswerFromResultsPrompt({
-    userMessage,
-    queryResult: result,
-  });
-
-  // System instruction to improve tone and clarity
+  // System prompt
   const systemPrompt: ChatCompletionMessageParam = {
     role: "system",
     content:
-    "You are a helpful assistant. Answer user questions naturally and clearly based on the data provided. Do not mention SQL queries, databases, or any internal processing. Just give a clear and direct answer.",
+      "You are a helpful assistant. Respond clearly and directly based on the provided data. Avoid mentioning SQL or internal processing. Be complete and accurate.",
   };
 
-  try {
-    const res = await OpenAIService.createChatCompletion([systemPrompt, prompt]);
+  // If no result, return early
+  if (!result || result.length === 0) {
+    return {
+      content: "No matching data found. Please try refining your question or parameters.",
+    };
+  }
 
-    let content = res?.content;
-    if (Buffer.isBuffer(content)) content = content.toString("utf-8");
-    if (typeof content !== "string") content = String(content);
+  // Chunk utility
+  function chunkArray<T>(arr: T[], size: number): T[][] {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+      arr.slice(i * size, (i + 1) * size)
+    );
+  }
+
+  const MAX_ITEMS_PER_CHUNK = 10; 
+  const chunks = chunkArray(result, MAX_ITEMS_PER_CHUNK);
+  const allResponses: string[] = [];
+
+  try {
+    for (const chunk of chunks) {
+      const prompt = PromptBuilder.buildAnswerFromResultsPrompt({
+        userMessage,
+        queryResult: chunk,
+      });
+
+      const res = await OpenAIService.createChatCompletion([systemPrompt, prompt]);
+
+      let content = res?.content;
+      if (Buffer.isBuffer(content)) content = content.toString("utf-8");
+      if (typeof content !== "string") content = String(content);
+
+      allResponses.push(content.trim());
+    }
+
+    const cleanedContent = allResponses.join("\n\n");
+
+    // Post-validation: Check for missing items
+    const nameFields = ["project_name", "category_name", "team_name", "name"];
+
+    const missingItems = result.filter((item) => {
+      const name = nameFields.map((field) => item[field]).find(Boolean);
+      return name && !cleanedContent.includes(name);
+    });
+
+    if (missingItems.length > 0) {
+      console.warn(
+        "AI response missing some items:",
+        missingItems.map((item) =>
+          nameFields.map((field) => item[field]).find(Boolean)
+        )
+      );
+    }
 
     return {
-      content: content.trim(),
+      content: cleanedContent,
     };
   } catch (err) {
     console.error("OpenAI answer generation error:", err);

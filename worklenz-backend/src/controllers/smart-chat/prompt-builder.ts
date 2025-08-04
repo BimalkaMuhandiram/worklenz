@@ -354,28 +354,16 @@ If you understand the task, proceed to generate a query and summary.
 
   // Convert SQL result to human-readable summary with enhancements
   static buildResponsePrompt(data: { items: any[]; teamId: string }): ChatCompletionMessageParam {
-  const { items, teamId } = data;
+  const { items } = data;
 
-  const filteredItems = Array.isArray(items)
-  ? items.filter(item => String(item.team_id) === String(teamId))
-  : [];
-
-const sanitizedItems = filteredItems.map(item => {
-  const copy = { ...item };
-  delete copy.owner_id;
-  delete copy.status_id;
-  delete copy.team_id;
-  delete copy.id;
-  delete copy.project_id;
-  return copy;
-});
-
-const readableItems = sanitizedItems.map(item => ({
-  ...item,
-  avg_completion_time: item.avg_completion_time
-    ? secondsToReadableTime(item.avg_completion_time)
-    : undefined,
-}));
+  const sanitizedItems = (Array.isArray(items) ? items : []).map(item => {
+    const copy = { ...item };
+    delete copy.owner_id;
+    delete copy.status_id;
+    delete copy.id;
+    delete copy.project_id;
+    return copy;
+  });
 
   const timestamp = new Date().toISOString();
 
@@ -389,7 +377,7 @@ You are a project assistant. Use the provided data to answer the user's question
 
 ## Data
 \`\`\`json
-${JSON.stringify(readableItems.slice(0, 10), null, 2)}
+${JSON.stringify(sanitizedItems.slice(0, 10), null, 2)}
 \`\`\`
 
 ## Instructions
@@ -591,29 +579,39 @@ ${JSON.stringify(data.schema, null, 2)}
 
   // Turn query output into human insight 
   static buildAnswerFromResultsPrompt(data: {
-    userMessage: string;
-    queryResult: any[];
-  }): ChatCompletionMessageParam {
-    return {
-      role: "user",
-      content: `
-Given the user message:
+  userMessage: string;
+  queryResult: any[];
+}): ChatCompletionMessageParam {
+  return {
+    role: "user",
+    content: `
+You are answering the following user question:
 "${data.userMessage}"
 
-And the following query result data (JSON):
+⚠️ IMPORTANT INSTRUCTIONS (READ CAREFULLY):
+
+- You MUST include **every row** in the data, regardless of whether some fields are null.
+- For each item, list **all fields exactly as given** (e.g., project_name, start_date, end_date, owner_name, etc.).
+- Do NOT summarize, combine, or omit any results or fields.
+- You MUST show each item clearly using a bullet list, numbered list, or Markdown table — depending on the data.
+- Every item MUST be shown on its own line or row. No combining.
+- Missing or skipping any item will be treated as a failure.
+- Use the **exact values** from the data, including nulls. Never guess or replace nulls.
+- Format clearly in Markdown.
+- If the data array is empty (i.e., zero rows), say: "No matching data found. Please try refining your question or parameters."
+
+Note: The data array contains ${data.queryResult.length} item(s).
+
+Here is the exact data (in JSON format):
+
 \`\`\`json
 ${JSON.stringify(data.queryResult, null, 2)}
 \`\`\`
 
-Summarize the data clearly and helpfully.
+Respond clearly and completely, based only on this data.
 
-- Mention all teams or items listed in the result.
-- Preserve exact counts or values (do not change or guess numbers).
-- If results include rankings (e.g., overdue count per team), list them from highest to lowest.
-- Use bullet points if helpful.
-- Respond in markdown using backticks \` for names, numbers, and dates.
-- Do NOT make assumptions or skip rows.
-      `.trim(),
-    };
-  }
+⚠️ Final reminder: Do NOT skip or omit any item or field.
+`.trim(),
+  };
+}
 }

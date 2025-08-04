@@ -10,6 +10,7 @@ import { AppError } from "../../utils/AppError";
 
 function sanitizeSQL(sql: string): string {
   return sql
+    .replace(/;\s*$/, "")
     .replace(/INTERVAL\s+'1\s+quarter'/gi, "INTERVAL '3 months'")
     .replace(/INTERVAL\s+'2\s+quarters'/gi, "INTERVAL '6 months'")
     .replace(/INTERVAL\s+'1\s+year'/gi, "INTERVAL '12 months'");
@@ -81,6 +82,19 @@ function wrapOrConditionsSafely(sql: string): string {
     (match, conditions, tail) => {
       if (/ or /i.test(conditions) && !/\(.+\)/s.test(conditions)) {
         return `WHERE (${conditions.trim()})${tail}`;
+      }
+      return match;
+    }
+  );
+}
+
+function normalizeWhereConditions(sql: string): string {
+  return sql.replace(
+    /(where\s+)(.*?)(\s+group|\s+order|\s+limit|\s*$)/is,
+    (match, whereKeyword, conditions, tail) => {
+      const needsWrapping = /\bor\b/i.test(conditions) && /\band\b/i.test(conditions) && !/\(.+\)/s.test(conditions);
+      if (needsWrapping) {
+        return `${whereKeyword}(${conditions.trim()})${tail}`;
       }
       return match;
     }
@@ -190,6 +204,7 @@ const authorizedTeamIds = teamResult.rows
 
   sqlQuery = fixBrokenGroupBy(sqlQuery);
   sqlQuery = wrapOrConditionsSafely(sqlQuery);
+  sqlQuery = normalizeWhereConditions(sqlQuery);
 
   // Step 4: Inject team_id filter (single or multiple)
   const lowerQuery = sqlQuery.toLowerCase();
@@ -235,6 +250,7 @@ const authorizedTeamIds = teamResult.rows
   try {
     const queryResult = await db.query(sqlQuery);
     dbResult = queryResult.rows;
+    console.log("Raw DB Result:", dbResult);
   } catch (err: any) {
     console.error("SQL execution error:", {
       error: err.message,

@@ -125,7 +125,7 @@ export const markdownTableStyle = css`
   }
 
   th {
-    background-color: #f5f5f5;
+    background-color: #807a7aff;
     font-weight: bold;
   }
 `;
