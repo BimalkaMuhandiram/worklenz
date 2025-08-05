@@ -393,18 +393,9 @@ try {
     const nameFields = ["project_name", "category_name", "team_name", "name"];
 
     const missingItems = result.filter((item) => {
-      const name = nameFields.map((field) => item[field]).find(Boolean);
-      return name && !cleanedContent.includes(name);
+      const rowString = JSON.stringify(item).toLowerCase().replace(/\s+/g, '');
+      return !cleanedContent.toLowerCase().replace(/\s+/g, '').includes(rowString);
     });
-
-    if (missingItems.length > 0) {
-      console.warn(
-        "AI response missing some items:",
-        missingItems.map((item) =>
-          nameFields.map((field) => item[field]).find(Boolean)
-        )
-      );
-    }
 
     return {
       content: cleanedContent,

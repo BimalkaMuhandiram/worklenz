@@ -57,6 +57,12 @@ function fixBrokenGroupBy(sql: string): string {
 }
 
 function injectTeamIdFilter(sqlQuery: string, teamIds: string | string[]): string {
+
+  if (/\bteam_id\s*=\s*['"]?[0-9a-f-]{36}['"]?/i.test(sqlQuery) ||
+      /\bteam_id\s+IN\s*\(/i.test(sqlQuery)) {
+    return sqlQuery; 
+  }
+
   const projectAliasMatch = /(?:join|from)\s+projects\s+(?:as\s+)?(\w+)/i.exec(sqlQuery);
   const alias = projectAliasMatch ? projectAliasMatch[1] : "projects";
 
@@ -99,6 +105,13 @@ function normalizeWhereConditions(sql: string): string {
       return match;
     }
   );
+}
+
+function addDistinctIfMissing(sql: string): string {
+  const hasDistinct = /^select\s+distinct/i.test(sql);
+  if (hasDistinct) return sql;
+
+  return sql.replace(/^select\s+/i, "SELECT DISTINCT ");
 }
 
 export default class SmartchatController extends SmartChatControllerBase {
@@ -205,6 +218,7 @@ const authorizedTeamIds = teamResult.rows
   sqlQuery = fixBrokenGroupBy(sqlQuery);
   sqlQuery = wrapOrConditionsSafely(sqlQuery);
   sqlQuery = normalizeWhereConditions(sqlQuery);
+  sqlQuery = addDistinctIfMissing(sqlQuery);
 
   // Step 4: Inject team_id filter (single or multiple)
   const lowerQuery = sqlQuery.toLowerCase();

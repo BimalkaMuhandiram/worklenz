@@ -23,6 +23,18 @@ function isValidUUID(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+function shouldUseNumberedList(userMessage: string): boolean {
+  const keywords = [
+    "all projects",
+    "list of",
+    "show all",
+    "which projects",
+    "all tasks",
+    "overview",
+  ];
+  return keywords.some((k) => userMessage.toLowerCase().includes(k));
+}
+
 function secondsToReadableTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
@@ -330,9 +342,8 @@ ${JSON.stringify(schema, null, 2)}
 
 ## Instructions
 - Only use columns and tables that exist.
-- To count overdue projects or tasks, use:
-  \`projects.project_status = 'overdue'\` OR \`projects.end_date < CURRENT_DATE\`
-- Always GROUP BY the relevant name field (e.g., team name or user full name) when comparing counts.
+- To count overdue projects, use:
+  projects.end_date < CURRENT_DATE AND projects.status_id = (SELECT id FROM sys_project_statuses WHERE name = 'In Progress')
 - Always apply \`team_id IN (${teamIdStr.split(", ").map(id => `'${id}'`).join(", ")})\` by JOINING the appropriate table (e.g., \`projects\`).
 - Never filter on non-existent columns like \`t.team_id\` or \`tm.name\`.
 - ORDER results by count descending if the user wants the "most" or "top" of something.
@@ -582,23 +593,50 @@ ${JSON.stringify(data.schema, null, 2)}
   userMessage: string;
   queryResult: any[];
 }): ChatCompletionMessageParam {
+  const useNumbers = shouldUseNumberedList(data.userMessage);
+
+  const formattingInstructions = useNumbers
+    ? `
+- Use a numbered list to separate each item.
+- Inside each item, use bullet points to list fields and values.
+- Format your response exactly like this:
+
+1. Project Name: Project Alpha  
+   - Status: Completed  
+   - Start Date: 2023-01-01  
+   - End Date: 2023-06-30
+
+- Each item should start on a new line, numbered consecutively.
+- Indent each bullet point with two spaces under the numbered item.
+`
+    : `
+- Use bullet points to show each item's fields, but do not number the items.
+- Format your response exactly like this:
+
+- Project Name: Project Alpha  
+  - Status: Completed  
+  - Start Date: 2023-01-01  
+  - End Date: 2023-06-30
+
+- Separate each item clearly with a blank line.
+`;
+
   return {
-    role: "user",
+    role: "system",
     content: `
 You are answering the following user question:
 "${data.userMessage}"
 
 ⚠️ IMPORTANT INSTRUCTIONS (READ CAREFULLY):
 
-- You MUST include **every row** in the data, regardless of whether some fields are null.
-- For each item, list **all fields exactly as given** (e.g., project_name, start_date, end_date, owner_name, etc.).
+- You MUST include **every row** in the data, even if some fields are null.
+- List **all fields exactly as given**.
 - Do NOT summarize, combine, or omit any results or fields.
-- You MUST show each item clearly using a bullet list, numbered list, or Markdown table — depending on the data.
-- Every item MUST be shown on its own line or row. No combining.
-- Missing or skipping any item will be treated as a failure.
-- Use the **exact values** from the data, including nulls. Never guess or replace nulls.
-- Format clearly in Markdown.
-- If the data array is empty (i.e., zero rows), say: "No matching data found. Please try refining your question or parameters."
+- ❌ Do NOT use tables.
+${formattingInstructions}
+- Use exactly one space after each dash and colon.
+- Use consistent indentation and formatting as shown.
+- If the data array is empty, say: "No matching data found. Please try refining your question or parameters."
 
 Note: The data array contains ${data.queryResult.length} item(s).
 
@@ -608,7 +646,7 @@ Here is the exact data (in JSON format):
 ${JSON.stringify(data.queryResult, null, 2)}
 \`\`\`
 
-Respond clearly and completely, based only on this data.
+Respond clearly and completely based only on this data.
 
 ⚠️ Final reminder: Do NOT skip or omit any item or field.
 `.trim(),
